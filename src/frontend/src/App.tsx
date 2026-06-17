@@ -29,14 +29,14 @@ import {
   Redo2,
   Save,
   Search,
-  Sparkles,
   Star,
   Table2,
   Tags,
   Undo2,
+  Upload,
   X
 } from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -57,6 +57,7 @@ import {
   type FileMetaRecord
 } from "./drafts";
 import { useAppStore } from "./store";
+import { Button, DialogShell } from "./ui";
 
 type EditorMode = "edit" | "split" | "preview";
 type MarkdownAction = "bold" | "italic" | "list" | "table" | "code" | "link" | "image" | "quote";
@@ -68,6 +69,14 @@ interface ToastMessage {
   message: string;
   kind: ToastKind;
 }
+
+interface MetadataExportPayload {
+  version: 1;
+  exportedAt: string;
+  records: FileMetaRecord[];
+}
+
+const LazyAiDialog = lazy(() => import("./AiDialog"));
 
 const markdownSnippetCompletion = autocompletion({
   override: [
@@ -101,21 +110,6 @@ const focusLabels = {
 
 function confirmLeave(dirty: boolean): boolean {
   return !dirty || window.confirm("当前文件有未保存修改，确定离开吗？");
-}
-
-function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "danger" | "plain" }) {
-  const { className = "", variant = "plain", ...rest } = props;
-  const variants = {
-    primary: "bg-brand text-white hover:bg-teal-800",
-    danger: "bg-red-50 text-red-700 hover:bg-red-100",
-    plain: "bg-slate-100 text-ink hover:bg-slate-200"
-  };
-  return (
-    <button
-      {...rest}
-      className={`inline-flex min-h-9 items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${className}`}
-    />
-  );
 }
 
 function IconButton(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
@@ -187,6 +181,39 @@ function exportMarkdown(filename: string, content: string) {
   anchor.download = filename.endsWith(".md") ? filename : `${filename}.md`;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function exportJson(filename: string, value: unknown) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename.endsWith(".json") ? filename : `${filename}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readMetadataRecords(value: unknown): FileMetaRecord[] {
+  const source = Array.isArray(value) ? value : isObject(value) && Array.isArray(value.records) ? value.records : null;
+  if (!source) throw new Error("元数据文件格式不正确：缺少 records 数组");
+
+  return source.map((item, index) => {
+    if (!isObject(item) || typeof item.path !== "string" || !item.path.trim()) {
+      throw new Error(`元数据文件格式不正确：第 ${index + 1} 条记录缺少 path`);
+    }
+    const tags = Array.isArray(item.tags) ? item.tags.filter((tag): tag is string => typeof tag === "string").join(",") : "";
+    return {
+      path: item.path.trim().replace(/\\/g, "/"),
+      favorite: item.favorite === true,
+      pinned: item.pinned === true,
+      tags: normalizeTags(tags),
+      updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : Date.now()
+    };
+  });
 }
 
 function buildLineDiff(left: string, right: string): Array<{ kind: "same" | "add" | "remove"; text: string; line: number }> {
@@ -303,20 +330,6 @@ function MarkdownToolbar({ disabled, onAction }: { disabled: boolean; onAction: 
   );
 }
 
-function DialogShell({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 z-40 grid place-items-center bg-slate-950/45 p-4">
-      <section className="max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-5 shadow-2xl">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold">{title}</h3>
-          <Button onClick={onClose}>关闭</Button>
-        </div>
-        {children}
-      </section>
-    </div>
-  );
-}
-
 export function App() {
   const {
     summary,
@@ -357,6 +370,7 @@ export function App() {
   const scrollSyncResetFrameRef = useRef<number | null>(null);
   const showPreviewTopRef = useRef(false);
   const toastIdRef = useRef(1);
+  const metadataInputRef = useRef<HTMLInputElement | null>(null);
   const [showPreviewTop, setShowPreviewTop] = useState(false);
 
   const showToast = useCallback((message: string, kind: ToastKind = "info") => {
@@ -752,6 +766,34 @@ export function App() {
     showToast("草稿已导出为 Markdown 文件", "success");
   }
 
+  function exportMetadata() {
+    const records = Object.values(fileMetaRecords).sort((left, right) => left.path.localeCompare(right.path));
+    const payload: MetadataExportPayload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      records
+    };
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
+    exportJson(`study-route-metadata-${stamp}.json`, payload);
+    showToast(`已导出 ${records.length} 条本地标记`, "success");
+  }
+
+  async function importMetadata(file: File) {
+    const text = await file.text();
+    const parsed = JSON.parse(text) as unknown;
+    const records = readMetadataRecords(parsed);
+    await Promise.all(records.map((record) => saveFileMeta(record)));
+    const refreshed = await getAllFileMeta();
+    const mapped = Object.fromEntries(refreshed.map((record) => [record.path, record]));
+    setFileMetaRecords(mapped);
+    if (current) {
+      const next = mapped[current.path] ?? (await getFileMeta(current.path));
+      setCurrentMetaRecord(next);
+      setTagInput(next.tags.join(", "));
+    }
+    reportStatus(`已导入 ${records.length} 条本地标记`, false);
+  }
+
   async function saveCurrent() {
     if (!current) return;
     setSaveState("saving");
@@ -928,6 +970,25 @@ export function App() {
                     </button>
                   ))}
                   {!allTags.length ? <span className="text-xs text-muted">暂无本地标签</span> : null}
+                </div>
+                <div className="flex items-center justify-end gap-2 border-t border-line pt-2">
+                  <IconButton type="button" disabled={!Object.keys(fileMetaRecords).length} title="导出标签/收藏/置顶" onClick={exportMetadata}>
+                    <Download className="h-4 w-4" />
+                  </IconButton>
+                  <IconButton type="button" title="导入标签/收藏/置顶" onClick={() => metadataInputRef.current?.click()}>
+                    <Upload className="h-4 w-4" />
+                  </IconButton>
+                  <input
+                    ref={metadataInputRef}
+                    className="hidden"
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      event.currentTarget.value = "";
+                      if (file) importMetadata(file).catch((error: Error) => setStatus(error.message, true));
+                    }}
+                  />
                 </div>
               </div>
               <FileTree files={visibleFiles} current={current} metaRecords={fileMetaRecords} onOpen={openFile} />
@@ -1122,12 +1183,16 @@ export function App() {
         await loadFiles();
         await openFile(file.path);
       }} /> : null}
-      {aiOpen ? <AiDialog section={section} current={current} content={content} onClose={() => setAiOpen(false)} onApply={(next, replace) => {
-        const separator = content.endsWith("\n") || !content ? "" : "\n\n";
-        setState({ content: replace ? `${next.trim()}\n` : `${content}${separator}${next.trim()}\n`, dirty: true });
-        setSaveState("dirty");
-        setStatus("AI 生成内容已写入编辑器，保存后才会更新文件");
-      }} /> : null}
+      {aiOpen ? (
+        <Suspense fallback={<DialogShell title="DeepSeek 生成" onClose={() => setAiOpen(false)}><div className="p-6 text-sm text-muted">加载中</div></DialogShell>}>
+          <LazyAiDialog section={section} current={current} content={content} onClose={() => setAiOpen(false)} onApply={(next, replace) => {
+            const separator = content.endsWith("\n") || !content ? "" : "\n\n";
+            setState({ content: replace ? `${next.trim()}\n` : `${content}${separator}${next.trim()}\n`, dirty: true });
+            setSaveState("dirty");
+            setStatus("AI 生成内容已写入编辑器，保存后才会更新文件");
+          }} />
+        </Suspense>
+      ) : null}
       {compareVersion ? (
         <DiffDialog
           version={compareVersion}
@@ -1432,59 +1497,6 @@ function RenameDialog({ current, onClose, onRenamed }: { current: FileMeta; onCl
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={onClose}>取消</Button>
           <Button type="submit" variant="primary">保存</Button>
-        </div>
-      </form>
-    </DialogShell>
-  );
-}
-
-function AiDialog({ section, current, content, onClose, onApply }: { section: SectionKey; current: FileMeta | null; content: string; onClose: () => void; onApply: (content: string, replace: boolean) => void }) {
-  const setStatus = useAppStore((state) => state.setStatus);
-  const [status, setAiStatus] = useState("检测中");
-  const [configured, setConfigured] = useState(false);
-  const [mode, setMode] = useState("doc");
-  const [prompt, setPrompt] = useState("");
-  const [useContext, setUseContext] = useState(true);
-  const [result, setResult] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    client.aiStatus().then((info) => {
-      setConfigured(info.configured);
-      setAiStatus(info.configured ? `${info.model} 已配置` : `未配置 ${info.required_env}`);
-    }).catch((error: Error) => setAiStatus(error.message));
-  }, []);
-
-  async function generate() {
-    setBusy(true);
-    try {
-      const response = await client.aiGenerate({
-        mode,
-        prompt,
-        section,
-        path: current?.path || "",
-        context: useContext ? content : ""
-      });
-      setResult(response.content);
-      setStatus(`DeepSeek 生成完成：${response.model}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <DialogShell title="DeepSeek 生成" onClose={onClose}>
-      <form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); generate().catch((error: Error) => setStatus(error.message, true)); }}>
-        <div className={`w-fit rounded-full px-3 py-1 text-xs ${configured ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>{status}</div>
-        <label className="grid gap-1 text-sm text-muted">生成类型<select className="min-h-10 rounded-md border border-line px-3 text-ink" value={mode} onChange={(event) => setMode(event.target.value)}><option value="doc">完整文档</option><option value="plan">学习计划</option><option value="log">学习日志</option><option value="review">复盘总结</option><option value="tasks">任务拆解</option><option value="polish">润色当前文档</option></select></label>
-        <label className="grid gap-1 text-sm text-muted">生成要求<textarea className="min-h-28 rounded-md border border-line p-3 text-ink" value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
-        <label className="flex items-center gap-2 text-sm text-muted"><input type="checkbox" checked={useContext} onChange={(event) => setUseContext(event.target.checked)} />带入当前编辑器内容作为上下文</label>
-        <label className="grid gap-1 text-sm text-muted">生成结果<textarea className="min-h-48 rounded-md border border-line p-3 font-mono text-sm text-ink" value={result} onChange={(event) => setResult(event.target.value)} /></label>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" onClick={onClose}>关闭</Button>
-          <Button type="submit" variant="primary" disabled={!configured || busy}><Sparkles className="h-4 w-4" />{busy ? "生成中" : "生成"}</Button>
-          <Button type="button" disabled={!result} onClick={() => onApply(result, false)}>插入编辑器</Button>
-          <Button type="button" variant="danger" disabled={!result} onClick={() => window.confirm("确定用 AI 生成结果替换当前编辑器内容吗？") && onApply(result, true)}>替换编辑器</Button>
         </div>
       </form>
     </DialogShell>

@@ -114,9 +114,9 @@ Only `dashboard.md` and Markdown files under managed section directories are edi
 
 The data model is plain Markdown files plus JSON API responses. Import/export can be done by copying directories, committing the private repository, or using the Web GUI/API to read and write Markdown content.
 
-## Encoding
+## Encoding And Line Endings
 
-All text files in this repository should be saved as UTF-8 without BOM. The `.editorconfig` file enforces UTF-8 for common source and documentation files, and the PowerShell launchers set Python I/O to UTF-8 before starting the CLI or Web GUI.
+All text files in this repository should be saved as UTF-8 without BOM and use CRLF line endings. The `.editorconfig` file enforces UTF-8 and CRLF for common source and documentation files, and the PowerShell launchers set Python I/O to UTF-8 before starting the CLI or Web GUI.
 
 If Chinese output looks garbled in Windows PowerShell, start the tool through `scripts/study.ps1` or `scripts/study-gui.ps1` so the UTF-8 console settings are applied.
 

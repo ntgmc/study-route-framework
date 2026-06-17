@@ -30,6 +30,16 @@ export function relativePath(target: string): string {
   return posixRelative(config().dataRoot, target);
 }
 
+function displayPath(target: string): string {
+  try {
+    return relativePath(target);
+  } catch {
+    const { frameworkRoot } = config();
+    const frameworkTemplatesRoot = path.join(frameworkRoot, "templates");
+    return `templates/${posixRelative(frameworkTemplatesRoot, target)}`;
+  }
+}
+
 function pathParts(rel: string): string[] {
   return rel.split(/[\\/]+/).filter(Boolean);
 }
@@ -57,6 +67,20 @@ export function isManagedPath(target: string): boolean {
   return managedDirs.has(parts[0]);
 }
 
+function isFrameworkTemplatePath(target: string): boolean {
+  try {
+    const rel = posixRelative(frameworkTemplatesRoot(), target);
+    const parts = pathParts(rel);
+    return Boolean(parts.length) && !parts.some((part) => ignoredDirs.has(part)) && rel.endsWith(".md");
+  } catch {
+    return false;
+  }
+}
+
+function isReadableManagedPath(target: string): boolean {
+  return isManagedPath(target) || isFrameworkTemplatePath(target);
+}
+
 export function resolveManaged(value: string): string {
   if (!value) throw new Error("缺少文件路径");
   const target = path.resolve(config().dataRoot, value);
@@ -64,15 +88,26 @@ export function resolveManaged(value: string): string {
   return target;
 }
 
-function sectionRoot(section: string): string {
+function dataSectionRoot(section: string): string {
   if (!isSectionKey(section)) throw new Error("未知分类");
   const item = sectionByKey.get(section);
   if (!item) throw new Error("未知分类");
   return path.resolve(config().dataRoot, item.path);
 }
 
+function frameworkTemplatesRoot(): string {
+  return path.resolve(config().frameworkRoot, "templates");
+}
+
+function sectionRoots(section: string): string[] {
+  const dataRoot = dataSectionRoot(section);
+  if (section !== "templates") return [dataRoot];
+  const frameworkRoot = frameworkTemplatesRoot();
+  return dataRoot === frameworkRoot ? [dataRoot] : [dataRoot, frameworkRoot];
+}
+
 function pathSection(filePath: string): SectionKey | "unknown" {
-  const rel = relativePath(filePath);
+  const rel = displayPath(filePath);
   if (rel === "dashboard.md") return "dashboard";
   const first = pathParts(rel)[0];
   const item = sections.find((section) => section.path === first);
@@ -88,7 +123,7 @@ function walkMarkdown(base: string): string[] {
     const target = path.join(base, entry.name);
     if (entry.isDirectory()) {
       files.push(...walkMarkdown(target));
-    } else if (entry.isFile() && entry.name.endsWith(".md") && isManagedPath(target)) {
+    } else if (entry.isFile() && entry.name.endsWith(".md") && isReadableManagedPath(target)) {
       files.push(target);
     }
   }
@@ -97,13 +132,19 @@ function walkMarkdown(base: string): string[] {
 
 function allMarkdownFiles(): string[] {
   const { dataRoot } = config();
-  const files: string[] = [];
+  const byDisplayPath = new Map<string, string>();
   const dashboard = path.join(dataRoot, "dashboard.md");
-  if (fs.existsSync(dashboard)) files.push(dashboard);
+  if (fs.existsSync(dashboard)) byDisplayPath.set(displayPath(dashboard), dashboard);
   for (const folder of [...managedDirs].sort()) {
-    files.push(...walkMarkdown(path.join(dataRoot, folder)));
+    const roots = folder === "templates" ? sectionRoots("templates") : [path.join(dataRoot, folder)];
+    for (const root of roots) {
+      for (const file of walkMarkdown(root)) {
+        const display = displayPath(file);
+        if (!byDisplayPath.has(display)) byDisplayPath.set(display, file);
+      }
+    }
   }
-  return [...new Set(files)].sort((a, b) => relativePath(a).localeCompare(relativePath(b)));
+  return [...byDisplayPath.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, file]) => file);
 }
 
 function formatDate(date: Date): string {
@@ -140,7 +181,7 @@ export function fileMeta(filePath: string): FileMeta {
     text = "";
   }
   return {
-    path: relativePath(filePath),
+    path: displayPath(filePath),
     name: path.basename(filePath),
     title: extractTitle(text, path.basename(filePath, ".md")),
     section: pathSection(filePath),
@@ -156,7 +197,14 @@ export function listMarkdownFiles(section: string, query = "", sort: SortMode = 
     const dashboard = path.join(config().dataRoot, "dashboard.md");
     files = fs.existsSync(dashboard) ? [dashboard] : [];
   } else {
-    files = walkMarkdown(sectionRoot(section));
+    const byDisplayPath = new Map<string, string>();
+    for (const root of sectionRoots(section)) {
+      for (const file of walkMarkdown(root)) {
+        const display = displayPath(file);
+        if (!byDisplayPath.has(display)) byDisplayPath.set(display, file);
+      }
+    }
+    files = [...byDisplayPath.values()];
   }
   let metas = files.map(fileMeta);
   if (query.trim()) {
@@ -174,7 +222,11 @@ export function listMarkdownFiles(section: string, query = "", sort: SortMode = 
 }
 
 export function getFile(pathValue: string): FileDocument {
-  const filePath = resolveManaged(pathValue);
+  let filePath = resolveManaged(pathValue);
+  if (!fs.existsSync(filePath) && pathParts(pathValue)[0] === "templates") {
+    const fallback = path.resolve(config().frameworkRoot, pathValue);
+    if (isFrameworkTemplatePath(fallback) && fs.existsSync(fallback)) filePath = fallback;
+  }
   return { meta: fileMeta(filePath), content: readText(filePath) };
 }
 
@@ -201,7 +253,7 @@ export function saveFile(pathValue: string, content: string) {
 export function createFile(section: string, title: string, name: string) {
   if (section === "dashboard") throw new Error("总览不能创建子文件");
   const filename = slugifyFilename(name || title);
-  const filePath = path.resolve(sectionRoot(section), filename);
+  const filePath = path.resolve(dataSectionRoot(section), filename);
   if (!isManagedPath(filePath)) throw new Error("文件路径无效");
   if (fs.existsSync(filePath)) throw new Error("文件已存在");
   writeText(filePath, defaultContent(section, title || path.basename(filePath, ".md")));
@@ -234,7 +286,7 @@ export function searchFiles(query: string, limit = 50): FileMeta[] {
   const results: FileMeta[] = [];
   for (const filePath of allMarkdownFiles()) {
     const text = readText(filePath);
-    if (!`${relativePath(filePath)}\n${text}`.toLocaleLowerCase().includes(needle)) continue;
+    if (!`${displayPath(filePath)}\n${text}`.toLocaleLowerCase().includes(needle)) continue;
     let lineNo = 1;
     let snippet = extractExcerpt(text);
     text.split(/\r?\n/).some((line, index) => {

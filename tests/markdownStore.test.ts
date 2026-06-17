@@ -91,6 +91,19 @@ describe("markdown store", () => {
     expect(archived.archived_to).toContain(".trash/study-gui");
   });
 
+  it("falls back to framework templates when external data has none", () => {
+    const templates = listMarkdownFiles("templates", "", "name");
+    expect(templates.map((item) => item.path)).toContain("templates/goal.md");
+    expect(getFile("templates/goal.md").content).toContain("# 目标名称");
+
+    saveFile("templates/goal.md", "# Custom Goal\n");
+    expect(fs.readFileSync(path.join(tempRoot, "templates", "goal.md"), "utf8")).toBe("# Custom Goal\n");
+    expect(getFile("templates/goal.md").content).toContain("Custom Goal");
+
+    const afterOverride = listMarkdownFiles("templates", "", "name").filter((item) => item.path === "templates/goal.md");
+    expect(afterOverride).toHaveLength(1);
+  });
+
   it("updates dashboard focus and appends daily log", () => {
     const focus = updateDashboardFocus({ main_goal: "新目标", today: "新任务" });
     expect(focus.focus["主目标"]).toBe("新目标");

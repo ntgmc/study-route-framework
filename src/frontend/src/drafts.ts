@@ -8,6 +8,14 @@ export interface DraftVersionRecord extends DraftRecord {
   id: string;
 }
 
+export interface FileMetaRecord {
+  path: string;
+  favorite: boolean;
+  pinned: boolean;
+  tags: string[];
+  updatedAt: number;
+}
+
 interface UiStateRecord {
   key: "ui";
   section: string;
@@ -15,9 +23,10 @@ interface UiStateRecord {
 }
 
 const DB_NAME = "study-route";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const DRAFT_STORE = "drafts";
 const DRAFT_VERSION_STORE = "draftVersions";
+const FILE_META_STORE = "fileMeta";
 const UI_STORE = "ui";
 const MAX_DRAFT_VERSIONS = 10;
 
@@ -31,6 +40,7 @@ function openDb(): Promise<IDBDatabase> {
         const versionStore = db.createObjectStore(DRAFT_VERSION_STORE, { keyPath: "id" });
         versionStore.createIndex("path", "path", { unique: false });
       }
+      if (!db.objectStoreNames.contains(FILE_META_STORE)) db.createObjectStore(FILE_META_STORE, { keyPath: "path" });
       if (!db.objectStoreNames.contains(UI_STORE)) db.createObjectStore(UI_STORE, { keyPath: "key" });
     };
     request.onerror = () => reject(request.error);
@@ -64,6 +74,19 @@ export async function saveDraft(path: string, content: string): Promise<void> {
 
 export async function clearDraft(path: string): Promise<void> {
   await withStore<undefined>(DRAFT_STORE, "readwrite", (store) => store.delete(path));
+}
+
+export async function getFileMeta(path: string): Promise<FileMetaRecord> {
+  const record = await withStore<FileMetaRecord | undefined>(FILE_META_STORE, "readonly", (store) => store.get(path));
+  return record ?? { path, favorite: false, pinned: false, tags: [], updatedAt: 0 };
+}
+
+export async function getAllFileMeta(): Promise<FileMetaRecord[]> {
+  return withStore<FileMetaRecord[]>(FILE_META_STORE, "readonly", (store) => store.getAll());
+}
+
+export async function saveFileMeta(record: FileMetaRecord): Promise<void> {
+  await withStore<IDBValidKey>(FILE_META_STORE, "readwrite", (store) => store.put({ ...record, updatedAt: Date.now() }));
 }
 
 export async function getDraftVersions(path: string): Promise<DraftVersionRecord[]> {

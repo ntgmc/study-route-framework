@@ -1,7 +1,11 @@
-interface DraftRecord {
+export interface DraftRecord {
   path: string;
   content: string;
   updatedAt: number;
+}
+
+export interface DraftVersionRecord extends DraftRecord {
+  id: string;
 }
 
 interface UiStateRecord {
@@ -11,9 +15,11 @@ interface UiStateRecord {
 }
 
 const DB_NAME = "study-route";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const DRAFT_STORE = "drafts";
+const DRAFT_VERSION_STORE = "draftVersions";
 const UI_STORE = "ui";
+const MAX_DRAFT_VERSIONS = 10;
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -21,6 +27,10 @@ function openDb(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(DRAFT_STORE)) db.createObjectStore(DRAFT_STORE, { keyPath: "path" });
+      if (!db.objectStoreNames.contains(DRAFT_VERSION_STORE)) {
+        const versionStore = db.createObjectStore(DRAFT_VERSION_STORE, { keyPath: "id" });
+        versionStore.createIndex("path", "path", { unique: false });
+      }
       if (!db.objectStoreNames.contains(UI_STORE)) db.createObjectStore(UI_STORE, { keyPath: "key" });
     };
     request.onerror = () => reject(request.error);
@@ -49,10 +59,32 @@ export async function getDraft(path: string): Promise<DraftRecord | undefined> {
 
 export async function saveDraft(path: string, content: string): Promise<void> {
   await withStore<IDBValidKey>(DRAFT_STORE, "readwrite", (store) => store.put({ path, content, updatedAt: Date.now() }));
+  await saveDraftVersion(path, content);
 }
 
 export async function clearDraft(path: string): Promise<void> {
   await withStore<undefined>(DRAFT_STORE, "readwrite", (store) => store.delete(path));
+}
+
+export async function getDraftVersions(path: string): Promise<DraftVersionRecord[]> {
+  const versions = await withStore<DraftVersionRecord[]>(DRAFT_VERSION_STORE, "readonly", (store) => store.index("path").getAll(path));
+  return versions.sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+async function saveDraftVersion(path: string, content: string): Promise<void> {
+  const versions = await getDraftVersions(path);
+  if (versions[0]?.content === content) return;
+
+  const record: DraftVersionRecord = {
+    id: `${path}:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+    path,
+    content,
+    updatedAt: Date.now()
+  };
+  await withStore<IDBValidKey>(DRAFT_VERSION_STORE, "readwrite", (store) => store.put(record));
+
+  const staleVersions = (await getDraftVersions(path)).slice(MAX_DRAFT_VERSIONS);
+  await Promise.all(staleVersions.map((version) => withStore<undefined>(DRAFT_VERSION_STORE, "readwrite", (store) => store.delete(version.id))));
 }
 
 export async function getUiState(): Promise<UiStateRecord | undefined> {

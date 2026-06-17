@@ -1,25 +1,62 @@
 import CodeMirror from "@uiw/react-codemirror";
+import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
 import { markdown } from "@codemirror/lang-markdown";
 import {
   Archive,
+  Bold,
   Bot,
   Check,
+  Code2,
+  Columns2,
+  Eye,
   FilePlus2,
   FolderPen,
-  PanelLeft,
-  RefreshCw,
+  Image,
+  Italic,
+  Link,
+  List,
+  PencilLine,
+  Quote,
   Save,
   Search,
-  Sparkles
+  Sparkles,
+  Table2
 } from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
+import type { EditorView } from "@codemirror/view";
 import type { FileMeta, RepoSummary, SectionKey } from "../../../types/domain";
 import { client } from "./api";
-import { clearDraft, getDraft, getUiState, saveDraft, saveUiState } from "./drafts";
+import { clearDraft, getDraft, getDraftVersions, getUiState, saveDraft, saveUiState, type DraftVersionRecord } from "./drafts";
 import { useAppStore } from "./store";
+
+type EditorMode = "edit" | "split" | "preview";
+type MarkdownAction = "bold" | "italic" | "list" | "table" | "code" | "link" | "image" | "quote";
+
+const markdownSnippetCompletion = autocompletion({
+  override: [
+    (context: CompletionContext) => {
+      const line = context.state.doc.lineAt(context.pos);
+      const before = line.text.slice(0, context.pos - line.from);
+      const options = [];
+
+      if (before.endsWith("![")) {
+        options.push({ label: "图片", type: "keyword", apply: "图片描述](image-url)" });
+      } else if (before.endsWith("[")) {
+        options.push({ label: "链接", type: "keyword", apply: "链接文本](https://example.com)" });
+      }
+
+      if (before.trim() === ">") {
+        options.push({ label: "引用", type: "keyword", apply: "> 引用内容" });
+      }
+
+      if (!options.length) return null;
+      return { from: context.pos, options };
+    }
+  ]
+});
 
 const focusLabels = {
   main_goal: "主目标",
@@ -47,6 +84,114 @@ function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant
   );
 }
 
+function IconButton(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
+  const { active = false, className = "", ...rest } = props;
+  return (
+    <button
+      {...rest}
+      className={`inline-grid h-9 w-9 place-items-center rounded-md border text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+        active ? "border-brand bg-teal-50 text-brand" : "border-line bg-white text-ink hover:bg-slate-100"
+      } ${className}`}
+    />
+  );
+}
+
+function insertMarkdown(view: EditorView, action: MarkdownAction) {
+  const selection = view.state.selection.main;
+  const doc = view.state.doc;
+  const selected = doc.sliceString(selection.from, selection.to);
+
+  function replaceRange(insert: string, from = selection.from, to = selection.to, selectFrom?: number, selectTo?: number) {
+    view.dispatch({
+      changes: { from, to, insert },
+      selection: { anchor: selectFrom ?? from + insert.length, head: selectTo ?? selectFrom ?? from + insert.length },
+      scrollIntoView: true
+    });
+    view.focus();
+  }
+
+  function wrap(prefix: string, suffix: string, placeholder: string) {
+    const inner = selected || placeholder;
+    const insert = `${prefix}${inner}${suffix}`;
+    const anchor = selection.from + prefix.length;
+    replaceRange(insert, selection.from, selection.to, selected ? anchor + inner.length : anchor, anchor + inner.length);
+  }
+
+  function prefixLines(prefix: string) {
+    const startLine = doc.lineAt(selection.from);
+    const endLine = doc.lineAt(selection.to);
+    const from = startLine.from;
+    const to = endLine.to;
+    const block = doc.sliceString(from, to);
+    const insert = block
+      .split("\n")
+      .map((line) => (line.startsWith(prefix) ? line : `${prefix}${line}`))
+      .join("\n");
+    replaceRange(insert, from, to, from, from + insert.length);
+  }
+
+  switch (action) {
+    case "bold":
+      wrap("**", "**", "加粗文本");
+      break;
+    case "italic":
+      wrap("*", "*", "斜体文本");
+      break;
+    case "list":
+      prefixLines("- ");
+      break;
+    case "quote":
+      prefixLines("> ");
+      break;
+    case "code": {
+      const inner = selected || "代码";
+      const insert = `\`\`\`markdown\n${inner}\n\`\`\``;
+      replaceRange(insert, selection.from, selection.to, selection.from + 12, selection.from + 12 + inner.length);
+      break;
+    }
+    case "table":
+      replaceRange("\n| 列 1 | 列 2 |\n| --- | --- |\n| 内容 | 内容 |\n");
+      break;
+    case "link": {
+      const label = selected || "链接文本";
+      const insert = `[${label}](https://example.com)`;
+      replaceRange(insert, selection.from, selection.to, selection.from + 1, selection.from + 1 + label.length);
+      break;
+    }
+    case "image": {
+      const label = selected || "图片描述";
+      const insert = `![${label}](image-url)`;
+      replaceRange(insert, selection.from, selection.to, selection.from + 2, selection.from + 2 + label.length);
+      break;
+    }
+  }
+}
+
+function MarkdownToolbar({ disabled, onAction }: { disabled: boolean; onAction: (action: MarkdownAction) => void }) {
+  const items: Array<{ action: MarkdownAction; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+    { action: "bold", label: "加粗 Ctrl+B", icon: Bold },
+    { action: "italic", label: "斜体 Ctrl+I", icon: Italic },
+    { action: "list", label: "无序列表", icon: List },
+    { action: "quote", label: "引用", icon: Quote },
+    { action: "table", label: "表格", icon: Table2 },
+    { action: "code", label: "代码块", icon: Code2 },
+    { action: "link", label: "链接", icon: Link },
+    { action: "image", label: "图片", icon: Image }
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <IconButton key={item.action} type="button" disabled={disabled} title={item.label} onClick={() => onAction(item.action)}>
+            <Icon className="h-4 w-4" />
+          </IconButton>
+        );
+      })}
+    </div>
+  );
+}
+
 function DialogShell({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-slate-950/45 p-4">
@@ -70,7 +215,6 @@ export function App() {
     current,
     content,
     dirty,
-    preview,
     status,
     statusError,
     query,
@@ -82,6 +226,23 @@ export function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState<EditorMode>("edit");
+  const [draftVersions, setDraftVersions] = useState<DraftVersionRecord[]>([]);
+  const editorViewRef = useRef<EditorView | null>(null);
+  const autoSavingRef = useRef(false);
+
+  const setMode = useCallback(
+    (mode: EditorMode) => {
+      setEditorMode(mode);
+      setState({ preview: mode === "preview" });
+    },
+    [setState]
+  );
+
+  const loadDraftVersions = useCallback(async (path: string) => {
+    const versions = await getDraftVersions(path).catch(() => []);
+    setDraftVersions(versions);
+  }, []);
 
   const refreshSummary = useCallback(async () => {
     const next = await client.summary();
@@ -118,10 +279,12 @@ export function App() {
         preview: false,
         view: "manager"
       });
+      setEditorMode("edit");
+      await loadDraftVersions(result.meta.path);
       await saveUiState(result.meta.section, result.meta.path).catch(() => undefined);
       setStatus(`已打开 ${result.meta.path}`);
     },
-    [setState, setStatus]
+    [loadDraftVersions, setState, setStatus]
   );
 
   const selectSection = useCallback(
@@ -137,6 +300,8 @@ export function App() {
         preview: false,
         query: ""
       });
+      setEditorMode("edit");
+      setDraftVersions([]);
       await saveUiState(target, "").catch(() => undefined);
       if (target !== "dashboard") {
         const result = await client.files(target, "", sort);
@@ -189,11 +354,82 @@ export function App() {
     return () => window.removeEventListener("beforeunload", handler);
   }, []);
 
+  const applyMarkdownAction = useCallback(
+    (action: MarkdownAction) => {
+      if (!current || !editorViewRef.current) return;
+      insertMarkdown(editorViewRef.current, action);
+    },
+    [current]
+  );
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (!current || editorMode === "preview") return;
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest(".cm-editor")) return;
+      const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === "b") {
+        event.preventDefault();
+        applyMarkdownAction("bold");
+      }
+      if ((event.ctrlKey || event.metaKey) && key === "i") {
+        event.preventDefault();
+        applyMarkdownAction("italic");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [applyMarkdownAction, current, editorMode]);
+
+  useEffect(() => {
+    if (!current || !dirty) return;
+    const path = current.path;
+    const timer = window.setTimeout(() => {
+      saveDraft(path, content)
+        .then(() => loadDraftVersions(path))
+        .catch(() => undefined);
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [content, current, dirty, loadDraftVersions]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const snapshot = useAppStore.getState();
+      if (!snapshot.current || !snapshot.dirty || autoSavingRef.current) return;
+
+      autoSavingRef.current = true;
+      const path = snapshot.current.path;
+      const savedContent = snapshot.content;
+      client
+        .saveFile({ path, content: savedContent })
+        .then(async (result) => {
+          await clearDraft(path).catch(() => undefined);
+          const latest = useAppStore.getState();
+          if (latest.current?.path === path) {
+            setState({
+              current: result.meta,
+              dirty: latest.content === savedContent ? false : latest.dirty
+            });
+            await loadDraftVersions(path);
+          }
+          await refreshSummary();
+          await loadFiles();
+          setStatus(`已自动保存 ${result.meta.path}`);
+        })
+        .catch((error: Error) => setStatus(`自动保存失败：${error.message}`, true))
+        .finally(() => {
+          autoSavingRef.current = false;
+        });
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [loadDraftVersions, loadFiles, refreshSummary, setState, setStatus]);
+
   async function saveCurrent() {
     if (!current) return;
     const result = await client.saveFile({ path: current.path, content });
     await clearDraft(current.path).catch(() => undefined);
     setState({ current: result.meta, dirty: false });
+    await loadDraftVersions(result.meta.path);
     await refreshSummary();
     await loadFiles();
     setStatus(`已保存 ${result.meta.path}${result.backup ? `，备份：${result.backup}` : ""}`);
@@ -317,52 +553,87 @@ export function App() {
               <FileList files={files} current={current} onOpen={openFile} />
             </aside>
             <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-white">
-              <div className="flex min-h-14 items-center justify-between gap-3 border-b border-line px-4 py-2">
-                <div className="min-w-0 truncate text-sm text-muted">{current?.path || "未选择文件"}</div>
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button disabled={!current} onClick={() => setState({ preview: !preview })}>
-                    <PanelLeft className="h-4 w-4" />
-                    {preview ? "编辑" : "预览"}
-                  </Button>
-                  <Button disabled={!current || current.path === "dashboard.md"} onClick={() => setRenameOpen(true)}>
-                    <FolderPen className="h-4 w-4" />
-                    重命名
-                  </Button>
-                  <Button disabled={!current || current.path === "dashboard.md"} variant="danger" onClick={() => archiveCurrent().catch((error: Error) => setStatus(error.message, true))}>
-                    <Archive className="h-4 w-4" />
-                    归档
-                  </Button>
-                  <Button disabled={!current} variant="primary" onClick={() => saveCurrent().catch((error: Error) => setStatus(error.message, true))}>
-                    <Save className="h-4 w-4" />
-                    保存
-                  </Button>
+              <div className="grid gap-2 border-b border-line px-4 py-2">
+                <div className="flex min-h-10 items-center justify-between gap-3">
+                  <div className="min-w-0 truncate text-sm text-muted">{current?.path || "未选择文件"}</div>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button disabled={!current || current.path === "dashboard.md"} onClick={() => setRenameOpen(true)}>
+                      <FolderPen className="h-4 w-4" />
+                      重命名
+                    </Button>
+                    <Button disabled={!current || current.path === "dashboard.md"} variant="danger" onClick={() => archiveCurrent().catch((error: Error) => setStatus(error.message, true))}>
+                      <Archive className="h-4 w-4" />
+                      归档
+                    </Button>
+                    <Button disabled={!current} variant="primary" onClick={() => saveCurrent().catch((error: Error) => setStatus(error.message, true))}>
+                      <Save className="h-4 w-4" />
+                      保存
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <MarkdownToolbar disabled={!current || editorMode === "preview"} onAction={applyMarkdownAction} />
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <select
+                      className="min-h-9 max-w-[220px] rounded-md border border-line bg-white px-2 text-sm disabled:opacity-50"
+                      disabled={!current || draftVersions.length === 0}
+                      value=""
+                      title="草稿版本"
+                      onChange={(event) => {
+                        const version = draftVersions.find((item) => item.id === event.target.value);
+                        if (!version || !current) return;
+                        if (!window.confirm("恢复这个本地草稿版本到编辑器？")) return;
+                        setState({ content: version.content, dirty: true });
+                        setStatus(`已恢复 ${new Date(version.updatedAt).toLocaleString()} 的草稿`);
+                      }}
+                    >
+                      <option value="">草稿版本</option>
+                      {draftVersions.map((version) => (
+                        <option key={version.id} value={version.id}>
+                          {new Date(version.updatedAt).toLocaleString()}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="inline-flex gap-1 rounded-md border border-line bg-slate-50 p-1">
+                      <IconButton type="button" disabled={!current} active={editorMode === "edit"} title="编辑" onClick={() => setMode("edit")}>
+                        <PencilLine className="h-4 w-4" />
+                      </IconButton>
+                      <IconButton type="button" disabled={!current} active={editorMode === "split"} title="分屏预览" onClick={() => setMode("split")}>
+                        <Columns2 className="h-4 w-4" />
+                      </IconButton>
+                      <IconButton type="button" disabled={!current} active={editorMode === "preview"} title="预览" onClick={() => setMode("preview")}>
+                        <Eye className="h-4 w-4" />
+                      </IconButton>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="min-h-0 overflow-hidden">
-                {preview ? (
-                  <article className="markdown-preview h-full overflow-auto p-6">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-                      {content || "没有可预览内容"}
-                    </ReactMarkdown>
-                  </article>
-                ) : (
+              <div className={`min-h-0 overflow-hidden ${editorMode === "split" ? "grid grid-cols-2 max-[920px]:grid-cols-1 max-[920px]:grid-rows-2" : ""}`}>
+                {editorMode !== "preview" ? (
                   <CodeMirror
                     value={content}
                     height="100%"
                     minHeight="100%"
-                    extensions={[markdown()]}
+                    extensions={[markdown(), markdownSnippetCompletion]}
                     editable={Boolean(current)}
                     basicSetup={{ lineNumbers: true, foldGutter: true }}
+                    onCreateEditor={(view) => {
+                      editorViewRef.current = view;
+                    }}
                     onChange={(value) => {
                       setState({ content: value, dirty: true });
-                      if (current) {
-                        saveDraft(current.path, value).catch(() => undefined);
-                        setStatus(`正在编辑 ${current.path}`);
-                      }
+                      if (current) setStatus(`正在编辑 ${current.path}`);
                     }}
                     className="h-full text-sm"
                   />
-                )}
+                ) : null}
+                {editorMode !== "edit" ? (
+                  <article className={`markdown-preview h-full overflow-auto p-6 ${editorMode === "split" ? "border-l border-line max-[920px]:border-l-0 max-[920px]:border-t" : ""}`}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                      {content || "没有可预览内容"}
+                    </ReactMarkdown>
+                  </article>
+                ) : null}
               </div>
               <div className={`min-h-9 border-t border-line px-4 py-2 text-sm ${statusError ? "text-red-700" : "text-muted"}`}>{status}</div>
             </section>

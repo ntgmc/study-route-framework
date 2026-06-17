@@ -1,9 +1,38 @@
-.idea
+# Environment
 .env
+*.env
+!.env.example
+
+# Local/private data
 local-data/
 private-data/
 resources/*.pdf
+
+# IDEs and editors
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.fleet/
+.vs/
+.vscode-test/
+*.code-workspace
+
+# Editor temp files
+*.swp
+*.swo
+*~
+
+# Python
 __pycache__/
 *.py[cod]
+
+# Runtime artifacts
 .backups/
 .trash/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

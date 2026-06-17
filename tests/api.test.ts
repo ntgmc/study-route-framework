@@ -13,16 +13,46 @@ function write(filePath: string, content: string) {
   fs.writeFileSync(filePath, content, "utf8");
 }
 
+function clearAiEnv() {
+  for (const key of [
+    "LLM_PROVIDER",
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_MODEL",
+    "LLM_TIMEOUT",
+    "LLM_MAX_TOKENS",
+    "LLM_TEMPERATURE",
+    "DEEPSEEK_API_KEY",
+    "DEEPSEEK_BASE_URL",
+    "DEEPSEEK_MODEL",
+    "DEEPSEEK_TIMEOUT",
+    "DEEPSEEK_MAX_TOKENS",
+    "DEEPSEEK_TEMPERATURE",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_MODEL",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
+    "OPENROUTER_MODEL",
+    "SILICONFLOW_API_KEY",
+    "SILICONFLOW_BASE_URL",
+    "SILICONFLOW_MODEL"
+  ]) {
+    delete process.env[key];
+  }
+}
+
 beforeEach(() => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "study-route-api-"));
   process.env.STUDY_ROUTE_DATA_DIR = tempRoot;
-  delete process.env.DEEPSEEK_API_KEY;
+  clearAiEnv();
   write(path.join(tempRoot, "dashboard.md"), "# Dashboard\n\n## 当前焦点\n\n- 主目标：A\n- 当前阶段：B\n- 本周重点：C\n- 今日任务：D\n");
   write(path.join(tempRoot, "plans", "demo.md"), "# Demo\n\nhello api");
 });
 
 afterEach(() => {
   delete process.env.STUDY_ROUTE_DATA_DIR;
+  clearAiEnv();
   fs.rmSync(tempRoot, { recursive: true, force: true });
 });
 
@@ -58,7 +88,40 @@ describe("api", () => {
     const app = createApp();
     const status = await request(app).get("/api/ai/status").expect(200);
     expect(status.body.configured).toBe(false);
+    expect(status.body.provider).toBe("DeepSeek");
     await request(app).post("/api/ai/generate").send({ prompt: "test" }).expect(428);
+  });
+
+  it("reports OpenAI-compatible LLM provider configuration", async () => {
+    process.env.LLM_PROVIDER = "custom";
+    process.env.LLM_API_KEY = "test-key";
+    process.env.LLM_BASE_URL = "https://llm.example.com/v1/";
+    process.env.LLM_MODEL = "custom-model";
+
+    const app = createApp();
+    const status = await request(app).get("/api/ai/status").expect(200);
+    expect(status.body).toMatchObject({
+      configured: true,
+      provider: "Custom OpenAI-Compatible",
+      provider_id: "custom",
+      model: "custom-model",
+      base_url: "https://llm.example.com/v1"
+    });
+  });
+
+  it("reports provider-specific LLM configuration", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.OPENAI_MODEL = "gpt-test";
+
+    const app = createApp();
+    const status = await request(app).get("/api/ai/status").expect(200);
+    expect(status.body).toMatchObject({
+      configured: true,
+      provider: "OpenAI",
+      provider_id: "openai",
+      model: "gpt-test",
+      base_url: "https://api.openai.com/v1"
+    });
   });
 
   it("builds constrained LLM messages with untrusted context boundaries", () => {

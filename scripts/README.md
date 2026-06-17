@@ -102,7 +102,7 @@ The GUI supports:
 - full-text search
 - updating `dashboard.md` focus fields
 - appending daily logs
-- optional DeepSeek-assisted Markdown generation
+- optional AI-assisted Markdown generation through OpenAI-compatible APIs
 
 Before saving an existing file, the GUI writes a backup under:
 
@@ -138,29 +138,58 @@ The Vite development URL is:
 http://127.0.0.1:5173
 ```
 
-## DeepSeek Generation
+## AI Generation
 
-The GUI does not store API keys. Set the API key in the terminal before startup:
+The GUI does not store API keys. Set provider variables in the terminal before startup.
+
+Generic OpenAI-compatible API:
 
 ```powershell
-$env:DEEPSEEK_API_KEY="your-api-key"
+$env:LLM_PROVIDER="custom"
+$env:LLM_API_KEY="your-api-key"
+$env:LLM_BASE_URL="https://api.example.com/v1"
+$env:LLM_MODEL="model-name"
 .\scripts\study-gui.ps1
 ```
 
 Linux/macOS:
 
 ```sh
-export DEEPSEEK_API_KEY="your-api-key"
+export LLM_PROVIDER="custom"
+export LLM_API_KEY="your-api-key"
+export LLM_BASE_URL="https://api.example.com/v1"
+export LLM_MODEL="model-name"
 sh scripts/study-gui.sh
 ```
 
-Optional variables:
+Provider-specific shortcuts:
 
 ```powershell
+$env:DEEPSEEK_API_KEY="your-api-key"
 $env:DEEPSEEK_MODEL="deepseek-v4-flash"
-$env:DEEPSEEK_BASE_URL="https://api.deepseek.com"
-$env:DEEPSEEK_MAX_TOKENS="1800"
-$env:DEEPSEEK_TEMPERATURE="0.4"
+```
+
+```powershell
+$env:OPENAI_API_KEY="your-api-key"
+$env:OPENAI_MODEL="gpt-4o-mini"
+```
+
+```powershell
+$env:OPENROUTER_API_KEY="your-api-key"
+$env:OPENROUTER_MODEL="openai/gpt-4o-mini"
+```
+
+```powershell
+$env:SILICONFLOW_API_KEY="your-api-key"
+$env:SILICONFLOW_MODEL="deepseek-ai/DeepSeek-V3"
+```
+
+Global options:
+
+```powershell
+$env:LLM_TIMEOUT="60"
+$env:LLM_MAX_TOKENS="1800"
+$env:LLM_TEMPERATURE="0.4"
 ```
 
 ## CLI Commands

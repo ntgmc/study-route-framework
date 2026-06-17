@@ -166,25 +166,43 @@ Recommended workflow:
 
 ## Optional AI Generation
 
-The Web GUI can call DeepSeek when configured through environment variables. API keys are never saved by the framework.
+The Web GUI can call OpenAI-compatible chat completion APIs when configured through environment variables. API keys are never saved by the framework.
+
+Provider-neutral configuration works with any compatible API:
 
 ```powershell
-$env:DEEPSEEK_API_KEY="your-api-key"
+$env:LLM_PROVIDER="custom"
+$env:LLM_API_KEY="your-api-key"
+$env:LLM_BASE_URL="https://api.example.com/v1"
+$env:LLM_MODEL="model-name"
 .\scripts\study-gui.ps1
 ```
 
 Linux/macOS:
 
 ```sh
-export DEEPSEEK_API_KEY="your-api-key"
+export LLM_PROVIDER="custom"
+export LLM_API_KEY="your-api-key"
+export LLM_BASE_URL="https://api.example.com/v1"
+export LLM_MODEL="model-name"
 sh scripts/study-gui.sh
 ```
 
-Optional variables:
+Built-in provider shortcuts are also supported:
 
-- `DEEPSEEK_MODEL`, default `deepseek-v4-flash`
-- `DEEPSEEK_BASE_URL`, default `https://api.deepseek.com`
-- `DEEPSEEK_MAX_TOKENS`, default `1800`
-- `DEEPSEEK_TEMPERATURE`, default `0.4`
+- DeepSeek: `DEEPSEEK_API_KEY`, optional `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL`
+- OpenAI: `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, `OPENAI_MODEL`
+- OpenRouter: `OPENROUTER_API_KEY`, optional `OPENROUTER_BASE_URL`, `OPENROUTER_MODEL`
+- SiliconFlow: `SILICONFLOW_API_KEY`, optional `SILICONFLOW_BASE_URL`, `SILICONFLOW_MODEL`
+
+Global `LLM_*` variables override provider-specific variables:
+
+- `LLM_PROVIDER`, one of `deepseek`, `openai`, `openrouter`, `siliconflow`, or `custom`
+- `LLM_API_KEY`
+- `LLM_BASE_URL`
+- `LLM_MODEL`
+- `LLM_TIMEOUT`, default `60`
+- `LLM_MAX_TOKENS`, default `1800`
+- `LLM_TEMPERATURE`, default `0.4`
 
 See `scripts/README.md` for command details.

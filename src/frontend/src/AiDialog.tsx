@@ -32,7 +32,7 @@ export function AiDialog({
       .aiStatus()
       .then((info) => {
         setConfigured(info.configured);
-        setAiStatus(info.configured ? `${info.model} 已配置` : `未配置 ${info.required_env}`);
+        setAiStatus(info.configured ? `${info.provider} · ${info.model} 已配置` : `未配置 ${info.required_env}`);
       })
       .catch((error: Error) => setAiStatus(error.message));
   }, []);
@@ -48,14 +48,14 @@ export function AiDialog({
         context: useContext ? content : ""
       });
       setResult(response.content);
-      setStatus(`DeepSeek 生成完成：${response.model}`);
+      setStatus(`${response.provider} 生成完成：${response.model}`);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <DialogShell title="DeepSeek 生成" onClose={onClose}>
+    <DialogShell title="AI 生成" onClose={onClose}>
       <form
         className="grid gap-3"
         onSubmit={(event) => {

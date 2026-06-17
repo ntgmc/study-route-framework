@@ -90,12 +90,13 @@ export interface DailyLogResponse {
 
 export interface AiStatusResponse {
   configured: boolean;
-  provider: "DeepSeek";
+  provider: string;
+  provider_id: string;
   model: string;
   base_url: string;
   max_tokens: number;
   temperature: number;
-  required_env: "DEEPSEEK_API_KEY";
+  required_env: string;
 }
 
 export interface AiGenerateRequest {
@@ -108,7 +109,7 @@ export interface AiGenerateRequest {
 
 export interface AiGenerateResponse {
   ok: true;
-  provider: "DeepSeek";
+  provider: string;
   model: string;
   content: string;
   usage: unknown;

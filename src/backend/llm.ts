@@ -11,6 +11,82 @@ const MAX_CONTEXT_CHARS = 12000;
 export class LlmConfigError extends Error {}
 export class LlmRequestError extends Error {}
 
+type LlmProviderId = "deepseek" | "openai" | "openrouter" | "siliconflow" | "custom";
+
+interface ProviderProfile {
+  id: LlmProviderId;
+  label: string;
+  apiKeyEnv: string;
+  baseUrlEnv: string;
+  modelEnv: string;
+  defaultBaseUrl: string;
+  defaultModel: string;
+  extraBody?: Record<string, unknown>;
+}
+
+interface LlmConfig {
+  configured: boolean;
+  providerId: LlmProviderId;
+  provider: string;
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  timeout: number;
+  maxTokens: number;
+  temperature: number;
+  requiredEnv: string;
+  extraBody?: Record<string, unknown>;
+}
+
+const PROVIDERS: Record<LlmProviderId, ProviderProfile> = {
+  deepseek: {
+    id: "deepseek",
+    label: "DeepSeek",
+    apiKeyEnv: "DEEPSEEK_API_KEY",
+    baseUrlEnv: "DEEPSEEK_BASE_URL",
+    modelEnv: "DEEPSEEK_MODEL",
+    defaultBaseUrl: DEFAULT_BASE_URL,
+    defaultModel: DEFAULT_MODEL,
+    extraBody: { thinking: { type: "disabled" } }
+  },
+  openai: {
+    id: "openai",
+    label: "OpenAI",
+    apiKeyEnv: "OPENAI_API_KEY",
+    baseUrlEnv: "OPENAI_BASE_URL",
+    modelEnv: "OPENAI_MODEL",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    defaultModel: "gpt-4o-mini"
+  },
+  openrouter: {
+    id: "openrouter",
+    label: "OpenRouter",
+    apiKeyEnv: "OPENROUTER_API_KEY",
+    baseUrlEnv: "OPENROUTER_BASE_URL",
+    modelEnv: "OPENROUTER_MODEL",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+    defaultModel: "openai/gpt-4o-mini"
+  },
+  siliconflow: {
+    id: "siliconflow",
+    label: "SiliconFlow",
+    apiKeyEnv: "SILICONFLOW_API_KEY",
+    baseUrlEnv: "SILICONFLOW_BASE_URL",
+    modelEnv: "SILICONFLOW_MODEL",
+    defaultBaseUrl: "https://api.siliconflow.cn/v1",
+    defaultModel: "deepseek-ai/DeepSeek-V3"
+  },
+  custom: {
+    id: "custom",
+    label: "Custom OpenAI-Compatible",
+    apiKeyEnv: "LLM_API_KEY",
+    baseUrlEnv: "LLM_BASE_URL",
+    modelEnv: "LLM_MODEL",
+    defaultBaseUrl: "",
+    defaultModel: ""
+  }
+};
+
 function parseIntEnv(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
@@ -23,16 +99,54 @@ function parseFloatEnv(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function envConfig() {
-  const apiKey = (process.env.DEEPSEEK_API_KEY ?? "").trim();
+function normalizeProvider(value: string | undefined): LlmProviderId | undefined {
+  const normalized = (value ?? "").trim().toLowerCase().replace(/[_\s]+/g, "-");
+  if (!normalized) return undefined;
+  if (normalized === "deepseek") return "deepseek";
+  if (normalized === "openai") return "openai";
+  if (normalized === "openrouter") return "openrouter";
+  if (normalized === "siliconflow" || normalized === "silicon-flow") return "siliconflow";
+  if (normalized === "custom" || normalized === "openai-compatible" || normalized === "compatible") return "custom";
+  return "custom";
+}
+
+function inferProvider(): LlmProviderId {
+  return (
+    normalizeProvider(process.env.LLM_PROVIDER) ??
+    (process.env.LLM_API_KEY ? "custom" : undefined) ??
+    (process.env.OPENAI_API_KEY ? "openai" : undefined) ??
+    (process.env.OPENROUTER_API_KEY ? "openrouter" : undefined) ??
+    (process.env.SILICONFLOW_API_KEY ? "siliconflow" : undefined) ??
+    "deepseek"
+  );
+}
+
+function cleanBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function envConfig(): LlmConfig {
+  const providerId = inferProvider();
+  const profile = PROVIDERS[providerId];
+  const apiKey = (process.env.LLM_API_KEY ?? process.env[profile.apiKeyEnv] ?? "").trim();
+  const baseUrl = cleanBaseUrl(process.env.LLM_BASE_URL ?? process.env[profile.baseUrlEnv] ?? profile.defaultBaseUrl);
+  const model = (process.env.LLM_MODEL ?? process.env[profile.modelEnv] ?? profile.defaultModel).trim();
+  const configured = Boolean(apiKey && baseUrl && model);
+  const timeout = parseIntEnv(process.env.LLM_TIMEOUT ?? process.env[`${profile.apiKeyEnv.replace(/_API_KEY$/, "")}_TIMEOUT`], DEFAULT_TIMEOUT);
+  const maxTokens = parseIntEnv(process.env.LLM_MAX_TOKENS ?? process.env[`${profile.apiKeyEnv.replace(/_API_KEY$/, "")}_MAX_TOKENS`], DEFAULT_MAX_TOKENS);
+  const temperature = parseFloatEnv(process.env.LLM_TEMPERATURE ?? process.env[`${profile.apiKeyEnv.replace(/_API_KEY$/, "")}_TEMPERATURE`], DEFAULT_TEMPERATURE);
   return {
-    configured: Boolean(apiKey),
+    configured,
+    providerId,
+    provider: profile.label,
     apiKey,
-    baseUrl: (process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL).trim().replace(/\/+$/, ""),
-    model: (process.env.DEEPSEEK_MODEL ?? DEFAULT_MODEL).trim(),
-    timeout: parseIntEnv(process.env.DEEPSEEK_TIMEOUT, DEFAULT_TIMEOUT),
-    maxTokens: parseIntEnv(process.env.DEEPSEEK_MAX_TOKENS, DEFAULT_MAX_TOKENS),
-    temperature: parseFloatEnv(process.env.DEEPSEEK_TEMPERATURE, DEFAULT_TEMPERATURE)
+    baseUrl,
+    model,
+    timeout,
+    maxTokens,
+    temperature,
+    requiredEnv: providerId === "custom" ? "LLM_API_KEY + LLM_BASE_URL + LLM_MODEL" : `${profile.apiKeyEnv} 或 LLM_API_KEY`,
+    extraBody: profile.extraBody
   };
 }
 
@@ -40,12 +154,13 @@ export function aiStatus(): AiStatusResponse {
   const cfg = envConfig();
   return {
     configured: cfg.configured,
-    provider: "DeepSeek",
+    provider: cfg.provider,
+    provider_id: cfg.providerId,
     model: cfg.model,
     base_url: cfg.baseUrl,
     max_tokens: cfg.maxTokens,
     temperature: cfg.temperature,
-    required_env: "DEEPSEEK_API_KEY"
+    required_env: cfg.requiredEnv
   };
 }
 
@@ -153,8 +268,8 @@ function summarizeError(detail: string): string {
 
 export async function generateMarkdown(payload: Record<string, string>): Promise<AiGenerateResponse> {
   const cfg = envConfig();
-  if (!cfg.apiKey) {
-    throw new LlmConfigError("未配置 DEEPSEEK_API_KEY，请先在启动服务的终端中设置环境变量");
+  if (!cfg.configured) {
+    throw new LlmConfigError(`未配置 ${cfg.requiredEnv}，请先在启动服务的终端中设置环境变量`);
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), cfg.timeout * 1000);
@@ -170,27 +285,27 @@ export async function generateMarkdown(payload: Record<string, string>): Promise
       body: JSON.stringify({
         model: cfg.model,
         messages: buildMessages(payload),
-        thinking: { type: "disabled" },
         stream: false,
         max_tokens: cfg.maxTokens,
-        temperature: cfg.temperature
+        temperature: cfg.temperature,
+        ...(cfg.extraBody ?? {})
       })
     });
     const body = await response.text();
-    if (!response.ok) throw new LlmRequestError(`DeepSeek API 返回 ${response.status}：${summarizeError(body)}`);
+    if (!response.ok) throw new LlmRequestError(`${cfg.provider} API 返回 ${response.status}：${summarizeError(body)}`);
     const data = JSON.parse(body) as { model?: string; choices?: Array<{ message?: { content?: string } }>; usage?: unknown };
     const content = data.choices?.[0]?.message?.content;
-    if (!content) throw new LlmRequestError("DeepSeek API 返回格式异常");
+    if (!content) throw new LlmRequestError(`${cfg.provider} API 返回格式异常`);
     return {
       ok: true,
-      provider: "DeepSeek",
+      provider: cfg.provider,
       model: data.model ?? cfg.model,
       content: content.trim(),
       usage: data.usage ?? {}
     };
   } catch (error) {
     if (error instanceof LlmRequestError || error instanceof LlmConfigError) throw error;
-    throw new LlmRequestError(error instanceof Error ? error.message : "DeepSeek API 请求失败");
+    throw new LlmRequestError(error instanceof Error ? error.message : `${cfg.provider} API 请求失败`);
   } finally {
     clearTimeout(timer);
   }

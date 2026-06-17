@@ -1184,7 +1184,7 @@ export function App() {
         await openFile(file.path);
       }} /> : null}
       {aiOpen ? (
-        <Suspense fallback={<DialogShell title="DeepSeek 生成" onClose={() => setAiOpen(false)}><div className="p-6 text-sm text-muted">加载中</div></DialogShell>}>
+        <Suspense fallback={<DialogShell title="AI 生成" onClose={() => setAiOpen(false)}><div className="p-6 text-sm text-muted">加载中</div></DialogShell>}>
           <LazyAiDialog section={section} current={current} content={content} onClose={() => setAiOpen(false)} onApply={(next, replace) => {
             const separator = content.endsWith("\n") || !content ? "" : "\n\n";
             setState({ content: replace ? `${next.trim()}\n` : `${content}${separator}${next.trim()}\n`, dirty: true });

@@ -12,11 +12,12 @@ This project follows a lightweight changelog format. Dates use `YYYY-MM-DD`.
 - CodeMirror 6 Markdown editor with toolbar actions, split preview, preview-only mode, keyboard shortcuts, and snippet completion.
 - IndexedDB drafts with recent draft versions, local file metadata, tags, favorites, pinned files, draft comparison, and draft export.
 - Local-first Express API and TypeScript CLI backed by Markdown files under the active data root.
-- DeepSeek-assisted Markdown generation with constrained prompts, untrusted context boundaries, and environment-variable configuration.
+- AI-assisted Markdown generation with constrained prompts, untrusted context boundaries, and environment-variable configuration.
 - Service Worker static asset caching with network-first navigation.
 - GitHub Actions CI for typecheck, tests, and production build.
 - Open-source project files: `LICENSE`, `CONTRIBUTING.md`, and this changelog.
 - POSIX shell launchers and Linux/macOS usage documentation for CLI and Web GUI startup.
+- Multi-provider AI generation through OpenAI-compatible APIs, including DeepSeek, OpenAI, OpenRouter, SiliconFlow, and custom endpoints.
 
 ### Changed
 

@@ -1,0 +1,9 @@
+.idea
+.env
+local-data/
+private-data/
+resources/*.pdf
+__pycache__/
+*.py[cod]
+.backups/
+.trash/

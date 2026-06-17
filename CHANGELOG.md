@@ -16,6 +16,7 @@ This project follows a lightweight changelog format. Dates use `YYYY-MM-DD`.
 - Service Worker static asset caching with network-first navigation.
 - GitHub Actions CI for typecheck, tests, and production build.
 - Open-source project files: `LICENSE`, `CONTRIBUTING.md`, and this changelog.
+- POSIX shell launchers and Linux/macOS usage documentation for CLI and Web GUI startup.
 
 ### Changed
 

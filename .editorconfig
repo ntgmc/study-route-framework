@@ -8,3 +8,7 @@ trim_trailing_whitespace = true
 
 [*.{md,py,ps1,html,css,js,json}]
 charset = utf-8
+
+[*.sh]
+charset = utf-8
+end_of_line = lf

@@ -1,0 +1,106 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  letter-spacing: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.cm-editor {
+  height: 100%;
+}
+
+.cm-scroller {
+  font-family: Consolas, "Cascadia Mono", "Microsoft YaHei", monospace;
+}
+
+.markdown-preview {
+  line-height: 1.65;
+}
+
+.markdown-preview h1 {
+  margin: 0 0 1rem;
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+.markdown-preview h2 {
+  margin: 1.4rem 0 .75rem;
+  border-bottom: 1px solid #d7dde5;
+  padding-bottom: .35rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.markdown-preview h3 {
+  margin: 1rem 0 .5rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.markdown-preview p,
+.markdown-preview ul,
+.markdown-preview ol,
+.markdown-preview table,
+.markdown-preview pre {
+  margin: .75rem 0;
+}
+
+.markdown-preview ul,
+.markdown-preview ol {
+  padding-left: 1.5rem;
+}
+
+.markdown-preview table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.markdown-preview th,
+.markdown-preview td {
+  border: 1px solid #d7dde5;
+  padding: .4rem .5rem;
+  vertical-align: top;
+}
+
+.markdown-preview th {
+  background: #f1f5f9;
+}
+
+.markdown-preview code {
+  border-radius: .25rem;
+  background: #eef2f7;
+  padding: .1rem .3rem;
+}
+
+.markdown-preview pre {
+  overflow: auto;
+  border-radius: .5rem;
+  background: #111827;
+  color: #f9fafb;
+  padding: .75rem;
+}
+
+.markdown-preview pre code {
+  background: transparent;
+  padding: 0;
+}

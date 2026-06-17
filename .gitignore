@@ -28,6 +28,11 @@ resources/*.pdf
 __pycache__/
 *.py[cod]
 
+# Node / TypeScript
+node_modules/
+dist/
+coverage/
+
 # Runtime artifacts
 .backups/
 .trash/

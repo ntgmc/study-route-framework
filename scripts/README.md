@@ -18,6 +18,7 @@ $env:STUDY_ROUTE_DATA_DIR="D:\GITHOME\my-study-route"
 Then run GUI or CLI commands from the public framework repository:
 
 ```powershell
+npm.cmd install
 .\scripts\study-gui.ps1
 .\scripts\study.ps1 init-log
 ```
@@ -29,6 +30,8 @@ Remove-Item Env:\STUDY_ROUTE_DATA_DIR
 ```
 
 ## Web GUI
+
+The Web GUI is implemented with React, TypeScript, Vite, CodeMirror 6, Tailwind CSS, and an Express API. `study-gui.ps1` builds the frontend when `dist/public/index.html` is missing, then starts the local server.
 
 Start the local Web GUI:
 
@@ -74,6 +77,18 @@ Archived files are moved under:
 
 Both paths are relative to the active data root.
 
+For active development, run the API and Vite dev server together:
+
+```powershell
+npm.cmd run dev
+```
+
+The Vite development URL is:
+
+```text
+http://127.0.0.1:5173
+```
+
 ## DeepSeek Generation
 
 The GUI does not store API keys. Set the API key in the terminal before startup:
@@ -93,6 +108,8 @@ $env:DEEPSEEK_TEMPERATURE="0.4"
 ```
 
 ## CLI Commands
+
+The PowerShell wrapper calls the TypeScript CLI through `npm.cmd run cli --`.
 
 Create today's learning log:
 

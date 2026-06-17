@@ -6,8 +6,9 @@ Study Route Framework is a local-first Markdown management system for learning r
 
 This public repository contains the reusable framework only:
 
-- Web GUI and API in `scripts/study_route_gui/`
-- CLI helpers in `scripts/study.py`
+- Web GUI and API in `src/backend/` and `src/frontend/`
+- CLI helpers in `src/cli/study.ts`
+- shared TypeScript API/domain types in `types/`
 - reusable Markdown templates in `templates/`
 - public demo data in `demo-data/`
 - framework documentation
@@ -37,6 +38,7 @@ That means a fresh public clone can run immediately with demo data, while person
 From the framework repository:
 
 ```powershell
+npm.cmd install
 .\scripts\study-gui.ps1
 ```
 
@@ -116,7 +118,7 @@ The data model is plain Markdown files plus JSON API responses. Import/export ca
 
 ## Encoding And Line Endings
 
-All text files in this repository should be saved as UTF-8 without BOM and use CRLF line endings. The `.editorconfig` file enforces UTF-8 and CRLF for common source and documentation files, and the PowerShell launchers set Python I/O to UTF-8 before starting the CLI or Web GUI.
+All text files in this repository should be saved as UTF-8 without BOM and use CRLF line endings. The `.editorconfig` file enforces UTF-8 and CRLF for common source and documentation files, and the PowerShell launchers set console I/O to UTF-8 before starting the CLI or Web GUI.
 
 If Chinese output looks garbled in Windows PowerShell, start the tool through `scripts/study.ps1` or `scripts/study-gui.ps1` so the UTF-8 console settings are applied.
 

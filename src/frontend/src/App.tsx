@@ -1,39 +1,73 @@
 import CodeMirror from "@uiw/react-codemirror";
 import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
+import { redo, undo } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import {
+  AlertCircle,
+  ArrowUp,
   Archive,
   Bold,
   Bot,
   Check,
+  CheckCircle2,
   Code2,
   Columns2,
+  Download,
   Eye,
   FilePlus2,
+  Folder,
   FolderPen,
+  GitCompare,
   Image,
   Italic,
   Link,
   List,
+  Loader2,
   PencilLine,
+  Pin,
   Quote,
+  Redo2,
   Save,
   Search,
   Sparkles,
-  Table2
+  Star,
+  Table2,
+  Tags,
+  Undo2,
+  X
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import type { EditorView } from "@codemirror/view";
+import type { EditorView, ViewUpdate } from "@codemirror/view";
 import type { FileMeta, RepoSummary, SectionKey } from "../../../types/domain";
 import { client } from "./api";
-import { clearDraft, getDraft, getDraftVersions, getUiState, saveDraft, saveUiState, type DraftVersionRecord } from "./drafts";
+import {
+  clearDraft,
+  getAllFileMeta,
+  getDraft,
+  getDraftVersions,
+  getFileMeta,
+  getUiState,
+  saveDraft,
+  saveFileMeta,
+  saveUiState,
+  type DraftVersionRecord,
+  type FileMetaRecord
+} from "./drafts";
 import { useAppStore } from "./store";
 
 type EditorMode = "edit" | "split" | "preview";
 type MarkdownAction = "bold" | "italic" | "list" | "table" | "code" | "link" | "image" | "quote";
+type SaveState = "saved" | "dirty" | "saving";
+type ToastKind = "success" | "error" | "info";
+
+interface ToastMessage {
+  id: number;
+  message: string;
+  kind: ToastKind;
+}
 
 const markdownSnippetCompletion = autocompletion({
   override: [
@@ -94,6 +128,83 @@ function IconButton(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { act
       } ${className}`}
     />
   );
+}
+
+function SaveIndicator({ state }: { state: SaveState }) {
+  const config = {
+    saved: { label: "已保存", className: "bg-green-50 text-green-700", icon: CheckCircle2 },
+    dirty: { label: "未保存", className: "bg-amber-50 text-amber-700", icon: AlertCircle },
+    saving: { label: "保存中", className: "bg-blue-50 text-blue-700", icon: Loader2 }
+  }[state];
+  const Icon = config.icon;
+  return (
+    <span className={`inline-flex min-h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium ${config.className}`}>
+      <Icon className={`h-3.5 w-3.5 ${state === "saving" ? "animate-spin" : ""}`} />
+      {config.label}
+    </span>
+  );
+}
+
+function ToastStack({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismiss: (id: number) => void }) {
+  if (!toasts.length) return null;
+  return (
+    <div className="fixed right-4 top-4 z-50 grid w-[min(360px,calc(100vw-2rem))] gap-2">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`flex items-start gap-2 rounded-lg border bg-white p-3 text-sm shadow-lg ${
+            toast.kind === "error" ? "border-red-200 text-red-800" : toast.kind === "success" ? "border-green-200 text-green-800" : "border-slate-200 text-ink"
+          }`}
+        >
+          {toast.kind === "error" ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
+          <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">{toast.message}</div>
+          <button type="button" className="grid h-6 w-6 shrink-0 place-items-center rounded hover:bg-slate-100" onClick={() => onDismiss(toast.id)} title="关闭">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function normalizeTags(value: string): string[] {
+  return [...new Set(value.split(/[,\s，、#]+/).map((tag) => tag.trim()).filter(Boolean))].slice(0, 12);
+}
+
+function extractInlineTags(text: string): string[] {
+  return [...new Set(Array.from(text.matchAll(/(^|\s)#([\p{L}\p{N}_-]{2,24})/gu)).map((match) => match[2]))].slice(0, 12);
+}
+
+function formatVersionTime(value: number): string {
+  return new Date(value).toLocaleString();
+}
+
+function exportMarkdown(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename.endsWith(".md") ? filename : `${filename}.md`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function buildLineDiff(left: string, right: string): Array<{ kind: "same" | "add" | "remove"; text: string; line: number }> {
+  const leftLines = left.split(/\r?\n/);
+  const rightLines = right.split(/\r?\n/);
+  const rows: Array<{ kind: "same" | "add" | "remove"; text: string; line: number }> = [];
+  const max = Math.max(leftLines.length, rightLines.length);
+  for (let index = 0; index < max; index += 1) {
+    const before = leftLines[index];
+    const after = rightLines[index];
+    if (before === after) {
+      rows.push({ kind: "same", text: before ?? "", line: index + 1 });
+    } else {
+      if (before !== undefined) rows.push({ kind: "remove", text: before, line: index + 1 });
+      if (after !== undefined) rows.push({ kind: "add", text: after, line: index + 1 });
+    }
+  }
+  return rows;
 }
 
 function insertMarkdown(view: EditorView, action: MarkdownAction) {
@@ -228,20 +339,151 @@ export function App() {
   const [aiOpen, setAiOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode>("edit");
   const [draftVersions, setDraftVersions] = useState<DraftVersionRecord[]>([]);
+  const [compareVersion, setCompareVersion] = useState<DraftVersionRecord | null>(null);
+  const [fileMetaRecords, setFileMetaRecords] = useState<Record<string, FileMetaRecord>>({});
+  const [currentMetaRecord, setCurrentMetaRecord] = useState<FileMetaRecord | null>(null);
+  const [tagInput, setTagInput] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
+  const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [editorMountId, setEditorMountId] = useState(0);
   const editorViewRef = useRef<EditorView | null>(null);
+  const previewRef = useRef<HTMLElement | null>(null);
   const autoSavingRef = useRef(false);
+  const editorLineProgressRef = useRef(0);
+  const previewSyncFrameRef = useRef<number | null>(null);
+  const editorSyncFrameRef = useRef<number | null>(null);
+  const scrollSyncSourceRef = useRef<"editor" | "preview" | null>(null);
+  const scrollSyncResetFrameRef = useRef<number | null>(null);
+  const showPreviewTopRef = useRef(false);
+  const toastIdRef = useRef(1);
+  const [showPreviewTop, setShowPreviewTop] = useState(false);
+
+  const showToast = useCallback((message: string, kind: ToastKind = "info") => {
+    const id = toastIdRef.current;
+    toastIdRef.current += 1;
+    setToasts((items) => [...items.slice(-3), { id, message, kind }]);
+    window.setTimeout(() => setToasts((items) => items.filter((item) => item.id !== id)), 4200);
+  }, []);
+
+  const reportStatus = useCallback(
+    (message: string, isError = false) => {
+      setStatus(message, isError);
+      showToast(message, isError ? "error" : "info");
+    },
+    [setStatus, showToast]
+  );
+
+  const setPreviewTopVisible = useCallback((visible: boolean) => {
+    if (showPreviewTopRef.current === visible) return;
+    showPreviewTopRef.current = visible;
+    setShowPreviewTop(visible);
+  }, []);
+
+  const runWithScrollSource = useCallback((source: "editor" | "preview", run: () => void) => {
+    if (scrollSyncResetFrameRef.current !== null) window.cancelAnimationFrame(scrollSyncResetFrameRef.current);
+    scrollSyncSourceRef.current = source;
+    run();
+    scrollSyncResetFrameRef.current = window.requestAnimationFrame(() => {
+      if (scrollSyncSourceRef.current === source) scrollSyncSourceRef.current = null;
+      scrollSyncResetFrameRef.current = null;
+    });
+  }, []);
+
+  const readEditorScrollProgress = useCallback((view: EditorView): number => {
+    const maxScroll = Math.max(1, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight);
+    const progress = view.scrollDOM.scrollTop / maxScroll;
+    const clamped = Math.min(1, Math.max(0, progress));
+    editorLineProgressRef.current = clamped;
+    return clamped;
+  }, []);
+
+  const syncPreviewToProgress = useCallback((progress = editorLineProgressRef.current) => {
+    const preview = previewRef.current;
+    if (!preview) return;
+    const maxScroll = Math.max(0, preview.scrollHeight - preview.clientHeight);
+    const nextTop = maxScroll * Math.min(1, Math.max(0, progress));
+    if (Math.abs(preview.scrollTop - nextTop) > 1) {
+      runWithScrollSource("editor", () => {
+        preview.scrollTop = nextTop;
+      });
+    }
+    setPreviewTopVisible(nextTop > 240);
+  }, [runWithScrollSource, setPreviewTopVisible]);
+
+  const schedulePreviewSync = useCallback(
+    (progress = editorLineProgressRef.current) => {
+      if (previewSyncFrameRef.current !== null) window.cancelAnimationFrame(previewSyncFrameRef.current);
+      previewSyncFrameRef.current = window.requestAnimationFrame(() => {
+        previewSyncFrameRef.current = null;
+        syncPreviewToProgress(progress);
+      });
+    },
+    [syncPreviewToProgress]
+  );
+
+  const readPreviewProgress = useCallback((preview: HTMLElement): number => {
+    const maxScroll = Math.max(1, preview.scrollHeight - preview.clientHeight);
+    const progress = Math.min(1, Math.max(0, preview.scrollTop / maxScroll));
+    editorLineProgressRef.current = progress;
+    return progress;
+  }, []);
+
+  const syncEditorToProgress = useCallback((view: EditorView, progress = editorLineProgressRef.current) => {
+    const clamped = Math.min(1, Math.max(0, progress));
+    const maxScroll = Math.max(0, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight);
+    const nextTop = maxScroll * clamped;
+    if (Math.abs(view.scrollDOM.scrollTop - nextTop) > 1) {
+      runWithScrollSource("preview", () => {
+        view.scrollDOM.scrollTop = nextTop;
+      });
+    }
+    editorLineProgressRef.current = clamped;
+  }, [runWithScrollSource]);
+
+  const handlePreviewScroll = useCallback(
+    (preview: HTMLElement) => {
+      const progress = readPreviewProgress(preview);
+      setPreviewTopVisible(preview.scrollTop > 240);
+      if (editorMode !== "split" || !editorViewRef.current || scrollSyncSourceRef.current === "editor") return;
+      const view = editorViewRef.current;
+      syncEditorToProgress(view, progress);
+    },
+    [editorMode, readPreviewProgress, setPreviewTopVisible, syncEditorToProgress]
+  );
+
+  const scheduleEditorSync = useCallback(
+    (progress = editorLineProgressRef.current) => {
+      if (editorSyncFrameRef.current !== null) window.cancelAnimationFrame(editorSyncFrameRef.current);
+      editorSyncFrameRef.current = window.requestAnimationFrame(() => {
+        editorSyncFrameRef.current = null;
+        if (editorViewRef.current) syncEditorToProgress(editorViewRef.current, progress);
+      });
+    },
+    [syncEditorToProgress]
+  );
 
   const setMode = useCallback(
     (mode: EditorMode) => {
+      if (mode === "edit") {
+        if (previewRef.current) scheduleEditorSync(readPreviewProgress(previewRef.current));
+      } else if (editorViewRef.current) {
+        schedulePreviewSync(readEditorScrollProgress(editorViewRef.current));
+      }
       setEditorMode(mode);
       setState({ preview: mode === "preview" });
     },
-    [setState]
+    [readEditorScrollProgress, readPreviewProgress, scheduleEditorSync, schedulePreviewSync, setState]
   );
 
   const loadDraftVersions = useCallback(async (path: string) => {
     const versions = await getDraftVersions(path).catch(() => []);
     setDraftVersions(versions);
+  }, []);
+
+  const loadFileMetaRecords = useCallback(async () => {
+    const records = await getAllFileMeta().catch(() => []);
+    setFileMetaRecords(Object.fromEntries(records.map((record) => [record.path, record])));
   }, []);
 
   const refreshSummary = useCallback(async () => {
@@ -267,10 +509,16 @@ export function App() {
       const result = await client.file(path);
       let nextContent = result.content;
       let nextDirty = false;
+      let discardedDraft = false;
       const draft = await getDraft(path).catch(() => undefined);
-      if (draft && draft.content !== result.content && window.confirm("检测到本地草稿，是否恢复到编辑器？")) {
-        nextContent = draft.content;
-        nextDirty = true;
+      if (draft && draft.content !== result.content) {
+        if (window.confirm("检测到本地草稿。\n\n选择“确定”恢复到编辑器；选择“取消”丢弃草稿并打开文件。")) {
+          nextContent = draft.content;
+          nextDirty = true;
+        } else {
+          await clearDraft(path).catch(() => undefined);
+          discardedDraft = true;
+        }
       }
       setState({
         current: result.meta,
@@ -280,9 +528,15 @@ export function App() {
         view: "manager"
       });
       setEditorMode("edit");
+      editorLineProgressRef.current = 0;
+      setSaveState(nextDirty ? "dirty" : "saved");
+      setCompareVersion(null);
       await loadDraftVersions(result.meta.path);
+      const meta = await getFileMeta(result.meta.path);
+      setCurrentMetaRecord(meta);
+      setTagInput(meta.tags.join(", "));
       await saveUiState(result.meta.section, result.meta.path).catch(() => undefined);
-      setStatus(`已打开 ${result.meta.path}`);
+      setStatus(discardedDraft ? `已丢弃 ${result.meta.path} 的本地草稿并打开文件` : `已打开 ${result.meta.path}`);
     },
     [loadDraftVersions, setState, setStatus]
   );
@@ -301,7 +555,13 @@ export function App() {
         query: ""
       });
       setEditorMode("edit");
+      editorLineProgressRef.current = 0;
       setDraftVersions([]);
+      setCompareVersion(null);
+      setCurrentMetaRecord(null);
+      setTagInput("");
+      setTagFilter("");
+      setSaveState("saved");
       await saveUiState(target, "").catch(() => undefined);
       if (target !== "dashboard") {
         const result = await client.files(target, "", sort);
@@ -330,6 +590,7 @@ export function App() {
   );
 
   const init = useCallback(async () => {
+    await loadFileMetaRecords();
     await refreshSummary();
     const saved = await getUiState().catch(() => undefined);
     if (saved?.section && saved.section !== "dashboard") {
@@ -338,11 +599,41 @@ export function App() {
     } else {
       await selectSection("dashboard");
     }
-  }, [openFile, refreshSummary, selectSection]);
+  }, [loadFileMetaRecords, openFile, refreshSummary, selectSection]);
 
   useEffect(() => {
     init().catch((error: Error) => setStatus(error.message, true));
   }, [init, setStatus]);
+
+  useEffect(() => {
+    if (statusError && status) showToast(status, "error");
+  }, [showToast, status, statusError]);
+
+  useEffect(() => {
+    return () => {
+      if (previewSyncFrameRef.current !== null) window.cancelAnimationFrame(previewSyncFrameRef.current);
+      if (editorSyncFrameRef.current !== null) window.cancelAnimationFrame(editorSyncFrameRef.current);
+      if (scrollSyncResetFrameRef.current !== null) window.cancelAnimationFrame(scrollSyncResetFrameRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view || editorMode !== "split") return undefined;
+
+    const handleEditorScroll = () => {
+      if (scrollSyncSourceRef.current === "preview") return;
+      syncPreviewToProgress(readEditorScrollProgress(view));
+    };
+
+    view.scrollDOM.addEventListener("scroll", handleEditorScroll, { passive: true });
+    return () => view.scrollDOM.removeEventListener("scroll", handleEditorScroll);
+  }, [editorMode, editorMountId, readEditorScrollProgress, syncPreviewToProgress]);
+
+  useEffect(() => {
+    if (editorMode === "edit") return;
+    schedulePreviewSync();
+  }, [content, current?.path, editorMode, schedulePreviewSync]);
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
@@ -398,6 +689,7 @@ export function App() {
       if (!snapshot.current || !snapshot.dirty || autoSavingRef.current) return;
 
       autoSavingRef.current = true;
+      setSaveState("saving");
       const path = snapshot.current.path;
       const savedContent = snapshot.content;
       client
@@ -410,29 +702,72 @@ export function App() {
               current: result.meta,
               dirty: latest.content === savedContent ? false : latest.dirty
             });
+            setSaveState(latest.content === savedContent ? "saved" : "dirty");
             await loadDraftVersions(path);
           }
           await refreshSummary();
           await loadFiles();
-          setStatus(`已自动保存 ${result.meta.path}`);
+          reportStatus(`已自动保存 ${result.meta.path}`, false);
         })
-        .catch((error: Error) => setStatus(`自动保存失败：${error.message}`, true))
+        .catch((error: Error) => {
+          setSaveState("dirty");
+          setStatus(`自动保存失败：${error.message}`, true);
+        })
         .finally(() => {
           autoSavingRef.current = false;
         });
     }, 30000);
     return () => window.clearInterval(timer);
-  }, [loadDraftVersions, loadFiles, refreshSummary, setState, setStatus]);
+  }, [loadDraftVersions, loadFiles, refreshSummary, reportStatus, setState, setStatus]);
+
+  async function updateCurrentMeta(patch: Partial<Omit<FileMetaRecord, "path" | "updatedAt">>) {
+    if (!current) return;
+    const base = currentMetaRecord ?? (await getFileMeta(current.path));
+    const next = { ...base, ...patch, path: current.path, updatedAt: Date.now() };
+    await saveFileMeta(next);
+    setCurrentMetaRecord(next);
+    if (patch.tags) setTagInput(next.tags.join(", "));
+    setFileMetaRecords((records) => ({ ...records, [next.path]: next }));
+    setStatus(`已更新 ${current.path} 的本地标记`);
+  }
+
+  function runEditorCommand(command: (view: EditorView) => boolean) {
+    if (!editorViewRef.current) return;
+    command(editorViewRef.current);
+    editorViewRef.current.focus();
+  }
+
+  function restoreDraftVersion(version: DraftVersionRecord) {
+    if (!current) return;
+    if (!window.confirm("恢复这个本地草稿版本到编辑器？")) return;
+    setState({ content: version.content, dirty: true });
+    setSaveState("dirty");
+    setStatus(`已恢复 ${formatVersionTime(version.updatedAt)} 的草稿`);
+  }
+
+  function exportSelectedDraft(version: DraftVersionRecord) {
+    const baseName = current?.name || version.path.split("/").pop() || "draft.md";
+    const stamp = new Date(version.updatedAt).toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
+    exportMarkdown(`${baseName.replace(/\.md$/, "")}-${stamp}.md`, version.content);
+    showToast("草稿已导出为 Markdown 文件", "success");
+  }
 
   async function saveCurrent() {
     if (!current) return;
-    const result = await client.saveFile({ path: current.path, content });
-    await clearDraft(current.path).catch(() => undefined);
-    setState({ current: result.meta, dirty: false });
-    await loadDraftVersions(result.meta.path);
-    await refreshSummary();
-    await loadFiles();
-    setStatus(`已保存 ${result.meta.path}${result.backup ? `，备份：${result.backup}` : ""}`);
+    setSaveState("saving");
+    try {
+      const result = await client.saveFile({ path: current.path, content });
+      await clearDraft(current.path).catch(() => undefined);
+      setState({ current: result.meta, dirty: false });
+      setSaveState("saved");
+      await loadDraftVersions(result.meta.path);
+      await refreshSummary();
+      await loadFiles();
+      reportStatus(`已保存 ${result.meta.path}${result.backup ? `，备份：${result.backup}` : ""}`, false);
+    } catch (error) {
+      setSaveState("dirty");
+      throw error;
+    }
   }
 
   async function archiveCurrent() {
@@ -458,10 +793,29 @@ export function App() {
 
   const activeInfo = summary?.sections.find((item) => item.key === section);
   const source = summary?.dataMode === "external" ? "外部数据" : "Demo 数据";
+  const currentInlineTags = useMemo(() => extractInlineTags(content), [content]);
+  const currentTags = useMemo(() => {
+    const localTags = currentMetaRecord?.tags ?? [];
+    return [...new Set([...localTags, ...currentInlineTags])];
+  }, [currentInlineTags, currentMetaRecord]);
+  const allTags = useMemo(
+    () => [...new Set(Object.values(fileMetaRecords).flatMap((record) => record.tags))].sort((left, right) => left.localeCompare(right)),
+    [fileMetaRecords]
+  );
+  const visibleFiles = useMemo(() => {
+    const filtered = tagFilter ? files.filter((file) => fileMetaRecords[file.path]?.tags.includes(tagFilter)) : files;
+    return [...filtered].sort((left, right) => {
+      const leftMeta = fileMetaRecords[left.path];
+      const rightMeta = fileMetaRecords[right.path];
+      if (Boolean(leftMeta?.pinned) !== Boolean(rightMeta?.pinned)) return leftMeta?.pinned ? -1 : 1;
+      if (Boolean(leftMeta?.favorite) !== Boolean(rightMeta?.favorite)) return leftMeta?.favorite ? -1 : 1;
+      return 0;
+    });
+  }, [fileMetaRecords, files, tagFilter]);
 
   return (
-    <div className="grid min-h-screen grid-cols-[252px_minmax(0,1fr)] bg-app text-ink max-[920px]:grid-cols-1">
-      <aside className="bg-slate-900 p-4 text-slate-100">
+    <div className="grid h-screen grid-cols-[252px_minmax(0,1fr)] overflow-hidden bg-app text-ink max-[920px]:grid-cols-1 max-[920px]:grid-rows-[auto_minmax(0,1fr)]">
+      <aside className="overflow-auto bg-slate-900 p-4 text-slate-100">
         <div className="mb-4 flex items-center gap-3 border-b border-white/10 px-2 pb-4">
           <div className="grid h-10 w-10 place-items-center rounded-lg bg-brand font-bold">SR</div>
           <div>
@@ -484,7 +838,7 @@ export function App() {
         </nav>
       </aside>
 
-      <main className="grid min-w-0 grid-rows-[auto_minmax(0,1fr)]">
+      <main className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
         <header className="flex min-h-[74px] items-center justify-between gap-4 border-b border-line bg-white px-6 py-3 max-[920px]:items-stretch max-[920px]:flex-col">
           <div className="min-w-0">
             <h2 className="truncate text-xl font-semibold">{view === "search" ? "全局搜索" : activeInfo?.label || "总览"}</h2>
@@ -524,7 +878,7 @@ export function App() {
         ) : null}
 
         {view === "manager" ? (
-          <section className="grid min-h-0 grid-cols-[minmax(280px,380px)_minmax(0,1fr)] max-[920px]:grid-cols-1 max-[920px]:grid-rows-[minmax(190px,34vh)_minmax(460px,1fr)]">
+          <section className="grid h-full min-h-0 grid-cols-[minmax(280px,380px)_minmax(0,1fr)] overflow-hidden max-[920px]:grid-cols-1 max-[920px]:grid-rows-[minmax(190px,34vh)_minmax(460px,1fr)]">
             <aside className="min-h-0 overflow-auto border-r border-line bg-slate-50 p-4 max-[920px]:border-b max-[920px]:border-r-0">
               <div className="mb-3 grid grid-cols-[minmax(0,1fr)_132px] gap-2">
                 <input
@@ -550,13 +904,60 @@ export function App() {
                   <option value="name">按文件名</option>
                 </select>
               </div>
-              <FileList files={files} current={current} onOpen={openFile} />
+              <div className="mb-3 grid gap-2 rounded-md border border-line bg-white p-3">
+                <div className="flex items-center gap-2 text-xs font-medium text-muted">
+                  <Tags className="h-3.5 w-3.5" />
+                  标签过滤
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    className={`rounded-full px-2 py-1 text-xs ${!tagFilter ? "bg-brand text-white" : "bg-slate-100 text-ink hover:bg-slate-200"}`}
+                    onClick={() => setTagFilter("")}
+                  >
+                    全部
+                  </button>
+                  {allTags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      className={`rounded-full px-2 py-1 text-xs ${tagFilter === tag ? "bg-brand text-white" : "bg-slate-100 text-ink hover:bg-slate-200"}`}
+                      onClick={() => setTagFilter(tag)}
+                    >
+                      #{tag}
+                    </button>
+                  ))}
+                  {!allTags.length ? <span className="text-xs text-muted">暂无本地标签</span> : null}
+                </div>
+              </div>
+              <FileTree files={visibleFiles} current={current} metaRecords={fileMetaRecords} onOpen={openFile} />
             </aside>
-            <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-white">
+            <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-white">
               <div className="grid gap-2 border-b border-line px-4 py-2">
                 <div className="flex min-h-10 items-center justify-between gap-3">
-                  <div className="min-w-0 truncate text-sm text-muted">{current?.path || "未选择文件"}</div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <div className="min-w-0 truncate text-sm text-muted">{current?.path || "未选择文件"}</div>
+                    <SaveIndicator state={saveState} />
+                  </div>
                   <div className="flex flex-wrap justify-end gap-2">
+                    <IconButton
+                      type="button"
+                      disabled={!current}
+                      active={Boolean(currentMetaRecord?.favorite)}
+                      title="收藏"
+                      onClick={() => updateCurrentMeta({ favorite: !currentMetaRecord?.favorite }).catch((error: Error) => setStatus(error.message, true))}
+                    >
+                      <Star className={`h-4 w-4 ${currentMetaRecord?.favorite ? "fill-current" : ""}`} />
+                    </IconButton>
+                    <IconButton
+                      type="button"
+                      disabled={!current}
+                      active={Boolean(currentMetaRecord?.pinned)}
+                      title="置顶"
+                      onClick={() => updateCurrentMeta({ pinned: !currentMetaRecord?.pinned }).catch((error: Error) => setStatus(error.message, true))}
+                    >
+                      <Pin className={`h-4 w-4 ${currentMetaRecord?.pinned ? "fill-current" : ""}`} />
+                    </IconButton>
                     <Button disabled={!current || current.path === "dashboard.md"} onClick={() => setRenameOpen(true)}>
                       <FolderPen className="h-4 w-4" />
                       重命名
@@ -574,6 +975,29 @@ export function App() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <MarkdownToolbar disabled={!current || editorMode === "preview"} onAction={applyMarkdownAction} />
                   <div className="flex flex-wrap items-center justify-end gap-2">
+                    <label className="relative">
+                      <Tags className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted" />
+                      <input
+                        className="min-h-9 w-[220px] rounded-md border border-line pl-8 pr-2 text-sm disabled:opacity-50"
+                        disabled={!current}
+                        value={tagInput}
+                        placeholder="标签，用逗号分隔"
+                        onChange={(event) => setTagInput(event.target.value)}
+                        onBlur={() => updateCurrentMeta({ tags: normalizeTags(tagInput) }).catch((error: Error) => setStatus(error.message, true))}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            updateCurrentMeta({ tags: normalizeTags(tagInput) }).catch((error: Error) => setStatus(error.message, true));
+                          }
+                        }}
+                      />
+                    </label>
+                    <IconButton type="button" disabled={!current || editorMode === "preview"} title="撤销 Ctrl+Z" onClick={() => runEditorCommand(undo)}>
+                      <Undo2 className="h-4 w-4" />
+                    </IconButton>
+                    <IconButton type="button" disabled={!current || editorMode === "preview"} title="重做 Ctrl+Shift+Z" onClick={() => runEditorCommand(redo)}>
+                      <Redo2 className="h-4 w-4" />
+                    </IconButton>
                     <select
                       className="min-h-9 max-w-[220px] rounded-md border border-line bg-white px-2 text-sm disabled:opacity-50"
                       disabled={!current || draftVersions.length === 0}
@@ -581,10 +1005,7 @@ export function App() {
                       title="草稿版本"
                       onChange={(event) => {
                         const version = draftVersions.find((item) => item.id === event.target.value);
-                        if (!version || !current) return;
-                        if (!window.confirm("恢复这个本地草稿版本到编辑器？")) return;
-                        setState({ content: version.content, dirty: true });
-                        setStatus(`已恢复 ${new Date(version.updatedAt).toLocaleString()} 的草稿`);
+                        if (version) restoreDraftVersion(version);
                       }}
                     >
                       <option value="">草稿版本</option>
@@ -594,6 +1015,12 @@ export function App() {
                         </option>
                       ))}
                     </select>
+                    <IconButton type="button" disabled={!current || draftVersions.length === 0} title="版本对比" onClick={() => setCompareVersion(draftVersions[0] ?? null)}>
+                      <GitCompare className="h-4 w-4" />
+                    </IconButton>
+                    <IconButton type="button" disabled={!current || draftVersions.length === 0} title="导出最新草稿" onClick={() => draftVersions[0] && exportSelectedDraft(draftVersions[0])}>
+                      <Download className="h-4 w-4" />
+                    </IconButton>
                     <div className="inline-flex gap-1 rounded-md border border-line bg-slate-50 p-1">
                       <IconButton type="button" disabled={!current} active={editorMode === "edit"} title="编辑" onClick={() => setMode("edit")}>
                         <PencilLine className="h-4 w-4" />
@@ -607,32 +1034,72 @@ export function App() {
                     </div>
                   </div>
                 </div>
+                {currentTags.length ? (
+                  <div className="flex flex-wrap gap-1">
+                    {currentTags.map((tag) => (
+                      <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-              <div className={`min-h-0 overflow-hidden ${editorMode === "split" ? "grid grid-cols-2 max-[920px]:grid-cols-1 max-[920px]:grid-rows-2" : ""}`}>
+              <div className={`h-full min-h-0 overflow-hidden ${editorMode === "split" ? "grid grid-cols-2 max-[920px]:grid-cols-1 max-[920px]:grid-rows-2" : ""}`}>
                 {editorMode !== "preview" ? (
-                  <CodeMirror
-                    value={content}
-                    height="100%"
-                    minHeight="100%"
-                    extensions={[markdown(), markdownSnippetCompletion]}
-                    editable={Boolean(current)}
-                    basicSetup={{ lineNumbers: true, foldGutter: true }}
-                    onCreateEditor={(view) => {
-                      editorViewRef.current = view;
-                    }}
-                    onChange={(value) => {
-                      setState({ content: value, dirty: true });
-                      if (current) setStatus(`正在编辑 ${current.path}`);
-                    }}
-                    className="h-full text-sm"
-                  />
+                  <div className="h-full min-h-0 overflow-hidden">
+                    <CodeMirror
+                      value={content}
+                      height="100%"
+                      minHeight="100%"
+                      extensions={[markdown(), markdownSnippetCompletion]}
+                      editable={Boolean(current)}
+                      basicSetup={{ lineNumbers: true, foldGutter: true }}
+                      onCreateEditor={(view) => {
+                        editorViewRef.current = view;
+                        setEditorMountId((value) => value + 1);
+                        scheduleEditorSync();
+                      }}
+                      onUpdate={(update: ViewUpdate) => {
+                        if (!update.docChanged && !update.selectionSet) return;
+                        const progress = readEditorScrollProgress(update.view);
+                        if (editorMode !== "edit") schedulePreviewSync(progress);
+                      }}
+                      onChange={(value) => {
+                        setState({ content: value, dirty: true });
+                        setSaveState("dirty");
+                        if (current) setStatus(`正在编辑 ${current.path}`);
+                      }}
+                      className="h-full text-sm"
+                    />
+                  </div>
                 ) : null}
                 {editorMode !== "edit" ? (
-                  <article className={`markdown-preview h-full overflow-auto p-6 ${editorMode === "split" ? "border-l border-line max-[920px]:border-l-0 max-[920px]:border-t" : ""}`}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-                      {content || "没有可预览内容"}
-                    </ReactMarkdown>
-                  </article>
+                  <div className={`relative h-full min-h-0 ${editorMode === "split" ? "border-l border-line max-[920px]:border-l-0 max-[920px]:border-t" : ""}`}>
+                    <article
+                      ref={previewRef}
+                      className="markdown-preview h-full overflow-auto p-6"
+                      onScroll={(event) => {
+                        handlePreviewScroll(event.currentTarget);
+                      }}
+                    >
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                        {content || "没有可预览内容"}
+                      </ReactMarkdown>
+                    </article>
+                    {showPreviewTop ? (
+                      <IconButton
+                        type="button"
+                        className="absolute bottom-4 right-4 shadow-lg"
+                        title="回到顶部"
+                        onClick={() => {
+                          previewRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                          setPreviewTopVisible(false);
+                        }}
+                      >
+                        <ArrowUp className="h-4 w-4" />
+                      </IconButton>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
               <div className={`min-h-9 border-t border-line px-4 py-2 text-sm ${statusError ? "text-red-700" : "text-muted"}`}>{status}</div>
@@ -658,9 +1125,68 @@ export function App() {
       {aiOpen ? <AiDialog section={section} current={current} content={content} onClose={() => setAiOpen(false)} onApply={(next, replace) => {
         const separator = content.endsWith("\n") || !content ? "" : "\n\n";
         setState({ content: replace ? `${next.trim()}\n` : `${content}${separator}${next.trim()}\n`, dirty: true });
+        setSaveState("dirty");
         setStatus("AI 生成内容已写入编辑器，保存后才会更新文件");
       }} /> : null}
+      {compareVersion ? (
+        <DiffDialog
+          version={compareVersion}
+          currentContent={content}
+          onClose={() => setCompareVersion(null)}
+          onRestore={() => {
+            restoreDraftVersion(compareVersion);
+            setCompareVersion(null);
+          }}
+          onExport={() => exportSelectedDraft(compareVersion)}
+        />
+      ) : null}
+      <ToastStack toasts={toasts} onDismiss={(id) => setToasts((items) => items.filter((item) => item.id !== id))} />
     </div>
+  );
+}
+
+function DiffDialog({
+  version,
+  currentContent,
+  onClose,
+  onRestore,
+  onExport
+}: {
+  version: DraftVersionRecord;
+  currentContent: string;
+  onClose: () => void;
+  onRestore: () => void;
+  onExport: () => void;
+}) {
+  const rows = useMemo(() => buildLineDiff(version.content, currentContent), [currentContent, version.content]);
+  return (
+    <DialogShell title={`版本对比 · ${formatVersionTime(version.updatedAt)}`} onClose={onClose}>
+      <div className="mb-3 flex flex-wrap justify-end gap-2">
+        <Button type="button" onClick={onExport}>
+          <Download className="h-4 w-4" />
+          导出草稿
+        </Button>
+        <Button type="button" variant="primary" onClick={onRestore}>
+          恢复草稿
+        </Button>
+      </div>
+      <div className="max-h-[62vh] overflow-auto rounded-md border border-line bg-slate-950 font-mono text-xs leading-6 text-slate-100">
+        {rows.map((row, index) => (
+          <div
+            key={`${row.kind}-${row.line}-${index}`}
+            className={`grid grid-cols-[56px_28px_minmax(0,1fr)] px-2 ${
+              row.kind === "add" ? "bg-green-950/60" : row.kind === "remove" ? "bg-red-950/60" : ""
+            }`}
+          >
+            <span className="select-none text-slate-400">{row.line}</span>
+            <span className={row.kind === "add" ? "text-green-300" : row.kind === "remove" ? "text-red-300" : "text-slate-500"}>
+              {row.kind === "add" ? "+" : row.kind === "remove" ? "-" : " "}
+            </span>
+            <span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{row.text || " "}</span>
+          </div>
+        ))}
+      </div>
+    </DialogShell>
   );
 }
 
@@ -765,22 +1291,70 @@ function Input({ label, value, onChange, type = "text" }: { label: string; value
   );
 }
 
-function FileList({ files, current, onOpen }: { files: FileMeta[]; current: FileMeta | null; onOpen: (path: string) => Promise<void> }) {
+function FileTree({
+  files,
+  current,
+  metaRecords,
+  onOpen
+}: {
+  files: FileMeta[];
+  current: FileMeta | null;
+  metaRecords: Record<string, FileMetaRecord>;
+  onOpen: (path: string) => Promise<void>;
+}) {
   const setStatus = useAppStore((state) => state.setStatus);
   if (!files.length) return <div className="rounded-lg border border-dashed border-line p-6 text-center text-sm text-muted">当前分类没有 Markdown 文件</div>;
+  const groups = files.reduce<Record<string, FileMeta[]>>((result, file) => {
+    const parts = file.path.split("/");
+    const folder = parts.length > 1 ? parts.slice(0, -1).join("/") : "根目录";
+    result[folder] = [...(result[folder] ?? []), file];
+    return result;
+  }, {});
   return (
-    <div className="grid gap-2">
-      {files.map((file) => (
-        <button
-          key={file.path}
-          type="button"
-          onClick={() => onOpen(file.path).catch((error: Error) => setStatus(error.message, true))}
-          className={`min-h-[74px] rounded-lg border bg-white p-3 text-left hover:border-brand hover:shadow-[0_0_0_3px_rgba(15,118,110,.18)] ${current?.path === file.path ? "border-brand shadow-[0_0_0_3px_rgba(15,118,110,.18)]" : "border-line"}`}
-        >
-          <div className="font-semibold [overflow-wrap:anywhere]">{file.title}</div>
-          <div className="text-xs text-muted [overflow-wrap:anywhere]">{file.path} · {file.updated} · {file.size} B</div>
-          <div className="text-xs text-muted [overflow-wrap:anywhere]">{file.excerpt}</div>
-        </button>
+    <div className="grid gap-3">
+      {Object.entries(groups).map(([folder, items]) => (
+        <div key={folder} className="grid gap-1">
+          <div className="flex items-center gap-2 px-1 text-xs font-semibold text-muted">
+            <Folder className="h-3.5 w-3.5" />
+            <span className="truncate">{folder}</span>
+          </div>
+          <div className="grid gap-1">
+            {items.map((file) => {
+              const meta = metaRecords[file.path];
+              return (
+                <button
+                  key={file.path}
+                  type="button"
+                  onClick={() => onOpen(file.path).catch((error: Error) => setStatus(error.message, true))}
+                  className={`min-h-[76px] rounded-md border bg-white p-3 text-left hover:border-brand hover:shadow-[0_0_0_3px_rgba(15,118,110,.18)] ${
+                    current?.path === file.path ? "border-brand shadow-[0_0_0_3px_rgba(15,118,110,.18)]" : "border-line"
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold [overflow-wrap:anywhere]">{file.title}</div>
+                      <div className="text-xs text-muted [overflow-wrap:anywhere]">{file.name} · {file.updated} · {file.size} B</div>
+                    </div>
+                    <div className="flex shrink-0 gap-1 text-muted">
+                      {meta?.pinned ? <Pin className="h-3.5 w-3.5 fill-current" /> : null}
+                      {meta?.favorite ? <Star className="h-3.5 w-3.5 fill-current" /> : null}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">{file.excerpt}</div>
+                  {meta?.tags.length ? (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {meta.tags.map((tag) => (
+                        <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       ))}
     </div>
   );

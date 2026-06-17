@@ -10,13 +10,15 @@ export function AiDialog({
   current,
   content,
   onClose,
-  onApply
+  onApply,
+  onConfirmReplace
 }: {
   section: SectionKey;
   current: FileMeta | null;
   content: string;
   onClose: () => void;
   onApply: (content: string, replace: boolean) => void;
+  onConfirmReplace: () => Promise<boolean>;
 }) {
   const setStatus = useAppStore((state) => state.setStatus);
   const [status, setAiStatus] = useState("检测中");
@@ -98,7 +100,18 @@ export function AiDialog({
           <Button type="button" disabled={!result} onClick={() => onApply(result, false)}>
             插入编辑器
           </Button>
-          <Button type="button" variant="danger" disabled={!result} onClick={() => window.confirm("确定用 AI 生成结果替换当前编辑器内容吗？") && onApply(result, true)}>
+          <Button
+            type="button"
+            variant="danger"
+            disabled={!result}
+            onClick={() => {
+              onConfirmReplace()
+                .then((confirmed) => {
+                  if (confirmed) onApply(result, true);
+                })
+                .catch((error: Error) => setStatus(error.message, true));
+            }}
+          >
             替换编辑器
           </Button>
         </div>

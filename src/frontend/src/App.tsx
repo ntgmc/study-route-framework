@@ -68,6 +68,15 @@ interface ToastMessage {
   id: number;
   message: string;
   kind: ToastKind;
+  persistent?: boolean;
+  actions?: ToastAction[];
+  onDismiss?: () => void;
+}
+
+interface ToastAction {
+  label: string;
+  variant?: "primary" | "danger" | "plain";
+  onClick: () => void;
 }
 
 interface MetadataExportPayload {
@@ -108,10 +117,6 @@ const focusLabels = {
   today: "今日任务"
 } as const;
 
-function confirmLeave(dirty: boolean): boolean {
-  return !dirty || window.confirm("当前文件有未保存修改，确定离开吗？");
-}
-
 function IconButton(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
   const { active = false, className = "", ...rest } = props;
   return (
@@ -139,22 +144,33 @@ function SaveIndicator({ state }: { state: SaveState }) {
   );
 }
 
-function ToastStack({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismiss: (id: number) => void }) {
+function ToastStack({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismiss: (toast: ToastMessage) => void }) {
   if (!toasts.length) return null;
   return (
-    <div className="fixed right-4 top-4 z-50 grid w-[min(360px,calc(100vw-2rem))] gap-2">
+    <div className="fixed right-4 top-4 z-50 grid w-[min(420px,calc(100vw-2rem))] gap-2">
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`flex items-start gap-2 rounded-lg border bg-white p-3 text-sm shadow-lg ${
+          className={`grid gap-3 rounded-lg border bg-white p-3 text-sm shadow-lg ${
             toast.kind === "error" ? "border-red-200 text-red-800" : toast.kind === "success" ? "border-green-200 text-green-800" : "border-slate-200 text-ink"
           }`}
         >
-          {toast.kind === "error" ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
-          <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">{toast.message}</div>
-          <button type="button" className="grid h-6 w-6 shrink-0 place-items-center rounded hover:bg-slate-100" onClick={() => onDismiss(toast.id)} title="关闭">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-start gap-2">
+            {toast.kind === "error" ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
+            <div className="min-w-0 flex-1 whitespace-pre-line [overflow-wrap:anywhere]">{toast.message}</div>
+            <button type="button" className="grid h-6 w-6 shrink-0 place-items-center rounded hover:bg-slate-100" onClick={() => onDismiss(toast)} title="关闭">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          {toast.actions?.length ? (
+            <div className="flex flex-wrap justify-end gap-2">
+              {toast.actions.map((action) => (
+                <Button key={action.label} type="button" variant={action.variant} onClick={action.onClick}>
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ))}
     </div>
@@ -380,6 +396,104 @@ export function App() {
     window.setTimeout(() => setToasts((items) => items.filter((item) => item.id !== id)), 4200);
   }, []);
 
+  const requestConfirmation = useCallback(
+    (
+      message: string,
+      options: {
+        confirmLabel?: string;
+        cancelLabel?: string;
+        kind?: ToastKind;
+        confirmVariant?: "primary" | "danger" | "plain";
+      } = {}
+    ) =>
+      new Promise<boolean>((resolve) => {
+        const id = toastIdRef.current;
+        toastIdRef.current += 1;
+        let settled = false;
+        const settle = (value: boolean) => {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+          setToasts((items) => items.filter((item) => item.id !== id));
+        };
+        setToasts((items) => [
+          ...items.slice(-3),
+          {
+            id,
+            message,
+            kind: options.kind ?? "info",
+            persistent: true,
+            onDismiss: () => settle(false),
+            actions: [
+              {
+                label: options.cancelLabel ?? "取消",
+                onClick: () => settle(false)
+              },
+              {
+                label: options.confirmLabel ?? "确认",
+                variant: options.confirmVariant ?? "primary",
+                onClick: () => settle(true)
+              }
+            ]
+          }
+        ]);
+      }),
+    []
+  );
+
+  const requestToastAction = useCallback(
+    (
+      message: string,
+      actions: Array<{
+        label: string;
+        value: string;
+        variant?: "primary" | "danger" | "plain";
+      }>,
+      kind: ToastKind = "info"
+    ) =>
+      new Promise<string | undefined>((resolve) => {
+        const id = toastIdRef.current;
+        toastIdRef.current += 1;
+        let settled = false;
+        const settle = (value: string | undefined) => {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+          setToasts((items) => items.filter((item) => item.id !== id));
+        };
+        setToasts((items) => [
+          ...items.slice(-3),
+          {
+            id,
+            message,
+            kind,
+            persistent: true,
+            onDismiss: () => settle(undefined),
+            actions: actions.map((action) => ({
+              label: action.label,
+              variant: action.variant,
+              onClick: () => settle(action.value)
+            }))
+          }
+        ]);
+      }),
+    []
+  );
+
+  const dismissToast = useCallback((toast: ToastMessage) => {
+    toast.onDismiss?.();
+    setToasts((items) => items.filter((item) => item.id !== toast.id));
+  }, []);
+
+  const confirmBeforeLeavingDirtyFile = useCallback(async () => {
+    if (!useAppStore.getState().dirty) return true;
+    return requestConfirmation("当前文件有未保存修改，确定离开吗？", {
+      confirmLabel: "离开",
+      cancelLabel: "继续编辑",
+      confirmVariant: "danger"
+    });
+  }, [requestConfirmation]);
+
   const reportStatus = useCallback(
     (message: string, isError = false) => {
       setStatus(message, isError);
@@ -519,14 +633,19 @@ export function App() {
 
   const openFile = useCallback(
     async (path: string) => {
-      if (!confirmLeave(useAppStore.getState().dirty)) return;
+      if (!(await confirmBeforeLeavingDirtyFile())) return;
       const result = await client.file(path);
       let nextContent = result.content;
       let nextDirty = false;
       let discardedDraft = false;
       const draft = await getDraft(path).catch(() => undefined);
       if (draft && draft.content !== result.content) {
-        if (window.confirm("检测到本地草稿。\n\n选择“确定”恢复到编辑器；选择“取消”丢弃草稿并打开文件。")) {
+        const draftAction = await requestToastAction("检测到本地草稿。\n\n请选择恢复草稿，或丢弃草稿并打开文件。", [
+          { label: "恢复草稿", value: "restore", variant: "primary" },
+          { label: "丢弃草稿", value: "discard", variant: "danger" }
+        ]);
+        if (!draftAction) return;
+        if (draftAction === "restore") {
           nextContent = draft.content;
           nextDirty = true;
         } else {
@@ -552,12 +671,12 @@ export function App() {
       await saveUiState(result.meta.section, result.meta.path).catch(() => undefined);
       setStatus(discardedDraft ? `已丢弃 ${result.meta.path} 的本地草稿并打开文件` : `已打开 ${result.meta.path}`);
     },
-    [loadDraftVersions, setState, setStatus]
+    [confirmBeforeLeavingDirtyFile, loadDraftVersions, requestToastAction, setState, setStatus]
   );
 
   const selectSection = useCallback(
     async (target: SectionKey) => {
-      if (!confirmLeave(useAppStore.getState().dirty)) return;
+      if (!(await confirmBeforeLeavingDirtyFile())) return;
       const nextView = target === "dashboard" ? "dashboard" : "manager";
       setState({
         section: target,
@@ -583,7 +702,7 @@ export function App() {
         if (result.files[0]) await openFile(result.files[0].path);
       }
     },
-    [openFile, setState, sort]
+    [confirmBeforeLeavingDirtyFile, openFile, setState, sort]
   );
 
   const openMeta = useCallback(
@@ -751,12 +870,17 @@ export function App() {
     editorViewRef.current.focus();
   }
 
-  function restoreDraftVersion(version: DraftVersionRecord) {
-    if (!current) return;
-    if (!window.confirm("恢复这个本地草稿版本到编辑器？")) return;
+  async function restoreDraftVersion(version: DraftVersionRecord): Promise<boolean> {
+    if (!current) return false;
+    const confirmed = await requestConfirmation("恢复这个本地草稿版本到编辑器？", {
+      confirmLabel: "恢复",
+      cancelLabel: "取消"
+    });
+    if (!confirmed) return false;
     setState({ content: version.content, dirty: true });
     setSaveState("dirty");
     setStatus(`已恢复 ${formatVersionTime(version.updatedAt)} 的草稿`);
+    return true;
   }
 
   function exportSelectedDraft(version: DraftVersionRecord) {
@@ -814,7 +938,12 @@ export function App() {
 
   async function archiveCurrent() {
     if (!current) return;
-    if (!window.confirm(`归档 ${current.path} 到 .trash/？`)) return;
+    const confirmed = await requestConfirmation(`归档 ${current.path} 到 .trash/？`, {
+      confirmLabel: "归档",
+      cancelLabel: "取消",
+      confirmVariant: "danger"
+    });
+    if (!confirmed) return;
     const result = await client.archiveFile({ path: current.path });
     await clearDraft(current.path).catch(() => undefined);
     setState({ current: null, content: "", dirty: false });
@@ -824,7 +953,7 @@ export function App() {
   }
 
   async function runSearch(text: string) {
-    if (!confirmLeave(dirty)) return;
+    if (dirty && !(await confirmBeforeLeavingDirtyFile())) return;
     if (!text.trim()) {
       await selectSection("dashboard");
       return;
@@ -1066,7 +1195,7 @@ export function App() {
                       title="草稿版本"
                       onChange={(event) => {
                         const version = draftVersions.find((item) => item.id === event.target.value);
-                        if (version) restoreDraftVersion(version);
+                        if (version) restoreDraftVersion(version).catch((error: Error) => setStatus(error.message, true));
                       }}
                     >
                       <option value="">草稿版本</option>
@@ -1185,7 +1314,11 @@ export function App() {
       }} /> : null}
       {aiOpen ? (
         <Suspense fallback={<DialogShell title="AI 生成" onClose={() => setAiOpen(false)}><div className="p-6 text-sm text-muted">加载中</div></DialogShell>}>
-          <LazyAiDialog section={section} current={current} content={content} onClose={() => setAiOpen(false)} onApply={(next, replace) => {
+          <LazyAiDialog section={section} current={current} content={content} onClose={() => setAiOpen(false)} onConfirmReplace={() => requestConfirmation("确定用 AI 生成结果替换当前编辑器内容吗？", {
+            confirmLabel: "替换",
+            cancelLabel: "取消",
+            confirmVariant: "danger"
+          })} onApply={(next, replace) => {
             const separator = content.endsWith("\n") || !content ? "" : "\n\n";
             setState({ content: replace ? `${next.trim()}\n` : `${content}${separator}${next.trim()}\n`, dirty: true });
             setSaveState("dirty");
@@ -1199,13 +1332,16 @@ export function App() {
           currentContent={content}
           onClose={() => setCompareVersion(null)}
           onRestore={() => {
-            restoreDraftVersion(compareVersion);
-            setCompareVersion(null);
+            restoreDraftVersion(compareVersion)
+              .then((restored) => {
+                if (restored) setCompareVersion(null);
+              })
+              .catch((error: Error) => setStatus(error.message, true));
           }}
           onExport={() => exportSelectedDraft(compareVersion)}
         />
       ) : null}
-      <ToastStack toasts={toasts} onDismiss={(id) => setToasts((items) => items.filter((item) => item.id !== id))} />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

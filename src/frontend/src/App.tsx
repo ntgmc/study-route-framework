@@ -43,7 +43,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import type { EditorView, ViewUpdate } from "@codemirror/view";
-import type { GitStatusResponse } from "../../../types/api";
+import type { AiApplyMode, AiSelectionRange, GitStatusResponse } from "../../../types/api";
 import type { ExecutionAdjustmentSuggestion, FileMeta, RepoSummary, SectionKey } from "../../../types/domain";
 import { client } from "./api";
 import {
@@ -329,6 +329,24 @@ function insertEditorText(view: EditorView, text: string) {
   view.focus();
 }
 
+function readAiSelection(view: EditorView | null): AiSelectionRange | undefined {
+  if (!view) return undefined;
+  const selection = view.state.selection.main;
+  if (selection.empty) return undefined;
+  const doc = view.state.doc;
+  const startLine = doc.lineAt(selection.from);
+  const endLine = doc.lineAt(selection.to);
+  return {
+    from: selection.from,
+    to: selection.to,
+    startLine: startLine.number,
+    startColumn: selection.from - startLine.from + 1,
+    endLine: endLine.number,
+    endColumn: selection.to - endLine.from + 1,
+    text: doc.sliceString(selection.from, selection.to)
+  };
+}
+
 function MarkdownToolbar({ disabled, onAction }: { disabled: boolean; onAction: (action: MarkdownAction) => void }) {
   const items: Array<{ action: MarkdownAction; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { action: "bold", label: "加粗 Ctrl+B", icon: Bold },
@@ -385,6 +403,8 @@ export function App() {
   const [tagInput, setTagInput] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [pendingAiOperationId, setPendingAiOperationId] = useState("");
+  const [aiSelection, setAiSelection] = useState<AiSelectionRange | undefined>(undefined);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [editorMountId, setEditorMountId] = useState(0);
   const editorViewRef = useRef<EditorView | null>(null);
@@ -686,6 +706,7 @@ export function App() {
       setEditorMode("edit");
       editorLineProgressRef.current = 0;
       setSaveState(nextDirty ? "dirty" : "saved");
+      setPendingAiOperationId("");
       setCompareVersion(null);
       await loadDraftVersions(result.meta.path);
       setCurrentMetaRecord(result.meta);
@@ -972,16 +993,49 @@ export function App() {
     reportStatus(`附件已保存到 ${result.path}`, false);
   }
 
+  function applyAiResult(payload: { content: string; operationId: string; applyMode: AiApplyMode; selection?: AiSelectionRange }) {
+    const next = payload.content.trim();
+    if (!next) return;
+    if (payload.applyMode === "selection" && payload.selection && editorViewRef.current) {
+      const view = editorViewRef.current;
+      const currentSelectionText = view.state.doc.sliceString(payload.selection.from, payload.selection.to);
+      if (currentSelectionText !== payload.selection.text) {
+        setStatus("当前选区已变化，请重新选择并生成 AI 草案", true);
+        return;
+      }
+      view.dispatch({
+        changes: { from: payload.selection.from, to: payload.selection.to, insert: next },
+        selection: { anchor: payload.selection.from + next.length },
+        scrollIntoView: true
+      });
+      view.focus();
+    } else if (payload.applyMode === "replace") {
+      setState({ content: `${next}\n`, dirty: true });
+    } else {
+      const separator = content.endsWith("\n") || !content ? "" : "\n\n";
+      setState({ content: `${content}${separator}${next}\n`, dirty: true });
+    }
+    setPendingAiOperationId(payload.operationId);
+    setSaveState("dirty");
+    setStatus("AI 草案已采纳到编辑器，保存后会写入文件并记录备份");
+  }
+
   async function saveCurrent() {
     if (!current) return;
     setSaveState("saving");
     try {
-      const result = await client.saveFile({ path: current.path, content });
+      const result = await client.saveFile({
+        path: current.path,
+        content,
+        ...(pendingAiOperationId ? { ai_operation_id: pendingAiOperationId } : {})
+      });
       await clearDraft(current.path).catch(() => undefined);
       setState({ current: result.meta, dirty: false });
+      setPendingAiOperationId("");
       setCurrentMetaRecord(result.meta);
       setTagInput(result.meta.tags.join(", "));
       setSaveState("saved");
+      setPendingAiOperationId("");
       await loadDraftVersions(result.meta.path);
       await refreshSummary();
       await loadFiles();
@@ -1142,7 +1196,10 @@ export function App() {
                 }}
               />
             </label>
-            <Button onClick={() => setAiOpen(true)}>
+            <Button onClick={() => {
+              setAiSelection(readAiSelection(editorViewRef.current));
+              setAiOpen(true);
+            }}>
               <Bot className="h-4 w-4" />
               AI 生成
             </Button>
@@ -1425,16 +1482,18 @@ export function App() {
       }} /> : null}
       {aiOpen ? (
         <Suspense fallback={<DialogShell title="AI 生成" onClose={() => setAiOpen(false)}><div className="p-6 text-sm text-muted">加载中</div></DialogShell>}>
-          <LazyAiDialog section={section} current={current} content={content} onClose={() => setAiOpen(false)} onOpenSettings={() => setAiSettingsOpen(true)} onConfirmReplace={() => requestConfirmation("确定用 AI 生成结果替换当前编辑器内容吗？", {
-            confirmLabel: "替换",
-            cancelLabel: "取消",
-            confirmVariant: "danger"
-          })} onApply={(next, replace) => {
-            const separator = content.endsWith("\n") || !content ? "" : "\n\n";
-            setState({ content: replace ? `${next.trim()}\n` : `${content}${separator}${next.trim()}\n`, dirty: true });
-            setSaveState("dirty");
-            setStatus("AI 生成内容已写入编辑器，保存后才会更新文件");
-          }} />
+          <LazyAiDialog
+            section={section}
+            current={current}
+            content={content}
+            selection={aiSelection}
+            onClose={() => setAiOpen(false)}
+            onOpenSettings={() => setAiSettingsOpen(true)}
+            onApply={(payload) => {
+              applyAiResult(payload);
+              setAiOpen(false);
+            }}
+          />
         </Suspense>
       ) : null}
       {aiSettingsOpen ? (

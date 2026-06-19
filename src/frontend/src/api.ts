@@ -1,6 +1,7 @@
 import type {
   AiGenerateRequest,
   AiGenerateResponse,
+  AiHistoryResponse,
   AiSettingsResponse,
   AiStatusResponse,
   ApplyRouteAdjustmentRequest,
@@ -83,6 +84,9 @@ export const client = {
     api<SaveAiSettingsResponse>("/api/ai/settings", { method: "PUT", body: JSON.stringify(body) }),
   aiGenerate: (body: AiGenerateRequest) =>
     api<AiGenerateResponse>("/api/ai/generate", { method: "POST", body: JSON.stringify(body) }),
+  aiHistory: (limit = 20) => api<AiHistoryResponse>(`/api/ai/history?${new URLSearchParams({ limit: String(limit) })}`),
+  markAiApplied: (id: string) =>
+    api<{ ok: true }>(`/api/ai/operations/${encodeURIComponent(id)}/apply`, { method: "POST" }),
   uploadAttachment: async (file: File) => {
     const response = await fetch(`/api/attachments?${new URLSearchParams({ name: file.name })}`, {
       method: "POST",

@@ -26,6 +26,7 @@ import {
 import { MAX_ATTACHMENT_BYTES, saveAttachment, sendAttachmentPath } from "./attachments.js";
 import { commitLearningSnapshot, gitStatus } from "./gitWorkspace.js";
 import { aiSettings, aiStatus, generateMarkdown, LlmConfigError, LlmRequestError, saveAiSettings } from "./llm.js";
+import { markAiOperationApplied, markAiOperationSaved, readAiOperations } from "./aiWorkflow.js";
 import { currentWorkspaceSchemaVersion, healthReport } from "./workspace.js";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -83,7 +84,13 @@ export function createApp() {
   app.get("/api/ai/settings", (_request, response) => response.json(versioned(aiSettings() as unknown as Record<string, unknown>, false)));
 
   app.post("/api/file", (request, response) => {
-    response.json(versioned(saveFile(asString(request.body?.path), asString(request.body?.content))));
+    const operationId = asString(request.body?.ai_operation_id);
+    if (operationId && !readAiOperations(1000).operations.some((item) => item.id === operationId)) {
+      throw new Error("AI 操作记录不存在");
+    }
+    const result = saveFile(asString(request.body?.path), asString(request.body?.content));
+    if (operationId) markAiOperationSaved(operationId, result.backup, result.diff);
+    response.json(versioned(result));
   });
   app.patch("/api/file/meta", (request, response) => {
     response.json(versioned(updateFileFrontMatter(asString(request.body?.path), {
@@ -98,6 +105,13 @@ export function createApp() {
   });
   app.put("/api/ai/settings", (request, response) => {
     response.json(versioned(saveAiSettings(request.body) as unknown as Record<string, unknown>, false));
+  });
+  app.get("/api/ai/history", (request, response) => {
+    const limit = Number.parseInt(asString(request.query.limit), 10);
+    response.json(versioned(readAiOperations(Number.isFinite(limit) ? limit : 50), false));
+  });
+  app.post("/api/ai/operations/:id/apply", (request, response) => {
+    response.json(versioned({ ok: true, operation: markAiOperationApplied(asString(request.params.id)) }, false));
   });
   app.post("/api/create", (request, response) => {
     response.status(201).json(versioned(createFile(asString(request.body?.section), asString(request.body?.title), asString(request.body?.name))));
@@ -128,7 +142,7 @@ export function createApp() {
   });
   app.post("/api/ai/generate", async (request, response, next) => {
     try {
-      response.json(versioned(await generateMarkdown(stringRecord(request.body)) as unknown as Record<string, unknown>, false));
+      response.json(versioned(await generateMarkdown((request.body ?? {}) as Record<string, unknown>) as unknown as Record<string, unknown>, false));
     } catch (error) {
       next(error);
     }

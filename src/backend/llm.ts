@@ -7,6 +7,7 @@ import type {
   AiWorkspaceSettings,
   SaveAiSettingsResponse
 } from "../../types/api.js";
+import { AI_ACTIONS, createAiOperationRecord, prepareAiWorkflow } from "./aiWorkflow.js";
 import { readAiSettings, saveAiSettings as persistAiSettings, type StoredAiSettings } from "./aiSettingsStore.js";
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
@@ -246,7 +247,9 @@ function envConfig(): LlmConfig {
     model: (envValue("LLM_MODEL", profile.modelEnv) ?? workspace.model ?? profile.defaultModel).trim(),
     timeout: parseIntEnv(envValue("LLM_TIMEOUT", prefixedEnv(profile, "TIMEOUT")) ?? (workspace.timeout === undefined ? undefined : String(workspace.timeout)), DEFAULT_TIMEOUT),
     maxTokens: parseIntEnv(envValue("LLM_MAX_TOKENS", prefixedEnv(profile, "MAX_TOKENS")) ?? (workspace.maxTokens === undefined ? undefined : String(workspace.maxTokens)), DEFAULT_MAX_TOKENS),
-    temperature: parseFloatEnv(envValue("LLM_TEMPERATURE", prefixedEnv(profile, "TEMPERATURE")) ?? (workspace.temperature === undefined ? undefined : String(workspace.temperature)), DEFAULT_TEMPERATURE)
+    temperature: parseFloatEnv(envValue("LLM_TEMPERATURE", prefixedEnv(profile, "TEMPERATURE")) ?? (workspace.temperature === undefined ? undefined : String(workspace.temperature)), DEFAULT_TEMPERATURE),
+    workspacePrompt: workspace.workspacePrompt ?? "",
+    promptTemplates: workspace.promptTemplates ?? []
   };
   const disabled = disabledReason();
   if (disabled) {
@@ -340,7 +343,8 @@ export function aiStatus(): AiStatusResponse {
       prompt_chars: MAX_PROMPT_CHARS,
       context_chars: MAX_CONTEXT_CHARS
     },
-    sends_context_fields: ["mode", "prompt", "section", "path", "context"]
+    sends_context_fields: ["mode", "actionId", "templateId", "workspacePrompt", "prompt", "section", "path", "context", "selection", "applyMode"],
+    actions: AI_ACTIONS
   };
 }
 
@@ -350,6 +354,7 @@ export function aiSettings(): AiSettingsResponse {
     settings: cfg.settings,
     saved_settings: readAiSettings(),
     providers: providerOptions(),
+    actions: AI_ACTIONS,
     config_source: cfg.configSource,
     env_overrides: cfg.envOverrides,
     required_key_env: cfg.requiredKeyEnv,
@@ -464,7 +469,7 @@ function summarizeError(detail: string): string {
   }
 }
 
-export async function generateMarkdown(payload: Record<string, string>): Promise<AiGenerateResponse> {
+export async function generateMarkdown(payload: Record<string, unknown>): Promise<AiGenerateResponse> {
   const cfg = envConfig();
   if (!cfg.enabled) {
     throw new LlmConfigError(cfg.disabledReason ?? "AI 请求已关闭");
@@ -474,6 +479,7 @@ export async function generateMarkdown(payload: Record<string, string>): Promise
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), cfg.timeout * 1000);
+  const workflow = prepareAiWorkflow(payload, cfg.settings);
   try {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -486,7 +492,7 @@ export async function generateMarkdown(payload: Record<string, string>): Promise
       headers,
       body: JSON.stringify({
         model: cfg.model,
-        messages: buildMessages(payload),
+        messages: workflow.messages,
         stream: false,
         max_tokens: cfg.maxTokens,
         temperature: cfg.temperature,
@@ -498,11 +504,23 @@ export async function generateMarkdown(payload: Record<string, string>): Promise
     const data = JSON.parse(body) as { model?: string; choices?: Array<{ message?: { content?: string } }>; usage?: unknown };
     const content = data.choices?.[0]?.message?.content;
     if (!content) throw new LlmRequestError(`${cfg.provider} API 返回格式异常`);
+    const record = createAiOperationRecord({
+      workflow,
+      provider: cfg.provider,
+      model: data.model ?? cfg.model,
+      content: content.trim()
+    });
     return {
       ok: true,
       provider: cfg.provider,
       model: data.model ?? cfg.model,
       content: content.trim(),
+      operation_id: record.id,
+      diff: record.diff,
+      request_context: record.request_context,
+      sources: record.sources,
+      base_hash: record.base_hash,
+      created_at: record.created_at,
       usage: data.usage ?? {}
     };
   } catch (error) {

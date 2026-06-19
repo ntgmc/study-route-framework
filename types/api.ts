@@ -33,6 +33,7 @@ export type FileResponse = FileDocument & WorkspaceResponseMeta;
 export interface SaveFileRequest {
   path: string;
   content: string;
+  ai_operation_id?: string;
 }
 
 export interface SaveDiffSummary {
@@ -174,6 +175,96 @@ export interface HealthResponse extends HealthReport, WorkspaceResponseMeta {}
 export type AiProviderId = "deepseek" | "openai" | "openrouter" | "siliconflow" | "custom" | "ollama" | "lmstudio";
 export type AiConfigSource = "environment" | "workspace" | "default" | "disabled";
 
+export type AiActionId =
+  | "inbox_to_log"
+  | "logs_to_weekly_review"
+  | "route_to_next_week_plan"
+  | "review_to_blockers"
+  | "current_file_to_tasks"
+  | "task_acceptance_criteria"
+  | "summarize_learning_evidence"
+  | "adjust_route_by_progress"
+  | "custom";
+
+export type AiApplyMode = "append" | "replace" | "selection";
+export type AiOperationStatus = "generated" | "applied_to_editor" | "saved" | "failed";
+export type AiSourceKind = "current_file" | "selection" | "user_prompt" | "template" | "workspace_prompt" | "model_inference";
+
+export interface AiPromptTemplate {
+  id: string;
+  name: string;
+  actionId: AiActionId;
+  prompt: string;
+  enabled: boolean;
+}
+
+export interface AiActionOption {
+  id: AiActionId;
+  label: string;
+  description: string;
+}
+
+export interface AiSelectionRange {
+  from: number;
+  to: number;
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+  text: string;
+}
+
+export interface AiRequestContextPreview {
+  action_id: AiActionId;
+  action_label: string;
+  template_id?: string;
+  template_name?: string;
+  apply_mode: AiApplyMode;
+  section: string;
+  path: string;
+  context_source: "current_file" | "selection" | "none";
+  prompt: string;
+  template_prompt?: string;
+  workspace_prompt?: string;
+  context_excerpt: string;
+  prompt_chars: number;
+  context_chars: number;
+  selection?: Omit<AiSelectionRange, "text"> & { text_chars: number };
+}
+
+export interface AiSourceMark {
+  kind: AiSourceKind;
+  label: string;
+  detail: string;
+  chars: number;
+}
+
+export interface AiOperationRecord {
+  id: string;
+  status: AiOperationStatus;
+  action_id: AiActionId;
+  action_label: string;
+  provider: string;
+  model: string;
+  section: string;
+  path: string;
+  apply_mode: AiApplyMode;
+  base_hash: string;
+  created_at: string;
+  updated_at: string;
+  saved_at?: string;
+  backup?: string;
+  diff: SaveDiffSummary;
+  request_context: AiRequestContextPreview;
+  sources: AiSourceMark[];
+  error?: string;
+}
+
+export interface AiHistoryResponse extends ApiResponseMeta {
+  operations: AiOperationRecord[];
+  warnings: string[];
+}
+
 export interface AiWorkspaceSettings {
   enabled: boolean;
   provider: AiProviderId;
@@ -182,6 +273,8 @@ export interface AiWorkspaceSettings {
   timeout: number;
   maxTokens: number;
   temperature: number;
+  workspacePrompt: string;
+  promptTemplates: AiPromptTemplate[];
 }
 
 export interface AiProviderOption {
@@ -200,6 +293,7 @@ export interface AiSettingsResponse extends ApiResponseMeta {
   settings: AiWorkspaceSettings;
   saved_settings: Partial<AiWorkspaceSettings>;
   providers: AiProviderOption[];
+  actions: AiActionOption[];
   config_source: AiConfigSource;
   env_overrides: string[];
   required_key_env: string;
@@ -234,10 +328,16 @@ export interface AiStatusResponse extends ApiResponseMeta {
     context_chars: number;
   };
   sends_context_fields: string[];
+  actions: AiActionOption[];
 }
 
 export interface AiGenerateRequest {
   mode: string;
+  actionId?: AiActionId;
+  templateId?: string;
+  workspacePrompt?: string;
+  selection?: AiSelectionRange;
+  applyMode?: AiApplyMode;
   prompt: string;
   section: string;
   path: string;
@@ -249,6 +349,12 @@ export interface AiGenerateResponse extends ApiResponseMeta {
   provider: string;
   model: string;
   content: string;
+  operation_id: string;
+  diff: SaveDiffSummary;
+  request_context: AiRequestContextPreview;
+  sources: AiSourceMark[];
+  base_hash: string;
+  created_at: string;
   usage: unknown;
 }
 

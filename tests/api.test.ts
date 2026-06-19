@@ -3,9 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import request from "supertest";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/backend/app.js";
 import { buildMessages } from "../src/backend/llm.js";
+import { AI_ACTIONS, prepareAiWorkflow, readAiOperations } from "../src/backend/aiWorkflow.js";
 
 let tempRoot = "";
 
@@ -75,6 +76,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   delete process.env.STUDY_ROUTE_DATA_DIR;
   clearAiEnv();
   fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -200,7 +202,8 @@ describe("api", () => {
     expect(status.body.configured).toBe(false);
     expect(status.body.provider).toBe("DeepSeek");
     expect(status.body.context_limits).toMatchObject({ prompt_chars: 4000, context_chars: 12000 });
-    expect(status.body.sends_context_fields).toEqual(["mode", "prompt", "section", "path", "context"]);
+    expect(status.body.sends_context_fields).toEqual(["mode", "actionId", "templateId", "workspacePrompt", "prompt", "section", "path", "context", "selection", "applyMode"]);
+    expect(status.body.actions.map((action: { id: string }) => action.id)).toContain("route_to_next_week_plan");
     const rejected = await request(app).post("/api/ai/generate").send({ prompt: "test" }).expect(428);
     expect(rejected.body.api_version).toBe(1);
   });
@@ -316,6 +319,140 @@ describe("api", () => {
       required_key_env: "OPENAI_API_KEY 或 LLM_API_KEY"
     });
     expect(fs.readFileSync(path.join(tempRoot, ".study-route", "ai-config.json"), "utf8")).not.toContain("apiKey");
+  });
+
+  it("stores workspace AI prompts and templates without secrets", async () => {
+    const app = createApp();
+    const saved = await request(app)
+      .put("/api/ai/settings")
+      .send({
+        enabled: true,
+        provider: "ollama",
+        model: "local-model",
+        baseUrl: "http://127.0.0.1:11434/v1",
+        workspacePrompt: "Always keep acceptance criteria measurable.",
+        promptTemplates: [
+          {
+            id: "weekly-review",
+            name: "Weekly Review",
+            actionId: "logs_to_weekly_review",
+            prompt: "Use evidence-first review format.",
+            enabled: true
+          }
+        ],
+        apiKey: "must-not-save"
+      })
+      .expect(200);
+
+    expect(saved.body.settings.workspacePrompt).toContain("acceptance criteria");
+    expect(saved.body.settings.promptTemplates[0]).toMatchObject({ id: "weekly-review", actionId: "logs_to_weekly_review" });
+    const stored = fs.readFileSync(path.join(tempRoot, ".study-route", "ai-config.json"), "utf8");
+    expect(stored).toContain("workspacePrompt");
+    expect(stored).not.toContain("must-not-save");
+    expect(stored).not.toContain("apiKey");
+  });
+
+  it("generates auditable AI drafts with selection context and records save history", async () => {
+    process.env.LLM_PROVIDER = "custom";
+    process.env.LLM_API_KEY = "test-key";
+    process.env.LLM_BASE_URL = "https://llm.example.test/v1";
+    process.env.LLM_MODEL = "mock-model";
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { messages: Array<{ content: string }> };
+      const joined = body.messages.map((message) => message.content).join("\n");
+      expect(joined).toContain("selected task");
+      expect(joined).not.toContain("full file only text");
+      return new Response(JSON.stringify({
+        model: "mock-model",
+        choices: [{ message: { content: "# Draft\n\n- selected task with acceptance criteria" } }],
+        usage: { total_tokens: 12 }
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = createApp();
+    await request(app)
+      .put("/api/ai/settings")
+      .send({
+        enabled: true,
+        provider: "custom",
+        model: "mock-model",
+        baseUrl: "https://llm.example.test/v1",
+        workspacePrompt: "Use measurable outcomes.",
+        promptTemplates: [{ id: "criteria", name: "Criteria", actionId: "task_acceptance_criteria", prompt: "Add checks.", enabled: true }]
+      })
+      .expect(200);
+
+    const generated = await request(app)
+      .post("/api/ai/generate")
+      .send({
+        actionId: "task_acceptance_criteria",
+        templateId: "criteria",
+        prompt: "Improve the selected task.",
+        section: "plans",
+        path: "plans/demo.md",
+        context: "full file only text",
+        selection: { from: 8, to: 21, startLine: 3, startColumn: 1, endLine: 3, endColumn: 14, text: "selected task" },
+        applyMode: "selection"
+      })
+      .expect(200);
+
+    expect(generated.body.operation_id).toMatch(/^ai_/);
+    expect(generated.body.request_context).toMatchObject({
+      action_id: "task_acceptance_criteria",
+      context_source: "selection",
+      template_id: "criteria",
+      apply_mode: "selection"
+    });
+    expect(generated.body.sources.map((source: { kind: string }) => source.kind)).toEqual(expect.arrayContaining(["selection", "template", "workspace_prompt", "model_inference"]));
+    expect(generated.body.diff.changed).toBeGreaterThan(0);
+
+    await request(app).post(`/api/ai/operations/${generated.body.operation_id}/apply`).send({}).expect(200);
+    const saved = await request(app)
+      .post("/api/file")
+      .send({ path: "plans/demo.md", content: "# Demo\n\nsaved by ai", ai_operation_id: generated.body.operation_id })
+      .expect(200);
+    expect(saved.body.backup).toContain(".backups/study-gui");
+
+    const history = await request(app).get("/api/ai/history").expect(200);
+    expect(history.body.operations[0]).toMatchObject({
+      id: generated.body.operation_id,
+      status: "saved",
+      backup: saved.body.backup
+    });
+    expect(fs.readFileSync(path.join(tempRoot, ".study-route", "history", "ai-operations.jsonl"), "utf8")).toContain(generated.body.operation_id);
+  });
+
+  it("defines stable learning AI actions and source marks", () => {
+    expect(AI_ACTIONS.filter((action) => action.id !== "custom")).toHaveLength(8);
+    const workflow = prepareAiWorkflow({
+      actionId: "current_file_to_tasks",
+      prompt: "Extract tasks",
+      section: "plans",
+      path: "plans/demo.md",
+      context: "Task A"
+    }, {
+      enabled: true,
+      provider: "ollama",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      model: "llama",
+      timeout: 60,
+      maxTokens: 1000,
+      temperature: 0.2,
+      workspacePrompt: "Keep style concise.",
+      promptTemplates: [{ id: "tasks", name: "Tasks", actionId: "current_file_to_tasks", prompt: "Use a table.", enabled: true }]
+    });
+    expect(workflow.sources.map((source) => source.kind)).toEqual(expect.arrayContaining(["current_file", "user_prompt", "workspace_prompt", "template", "model_inference"]));
+    expect(workflow.messages.map((message) => message.content).join("\n")).toContain("Keep style concise.");
+  });
+
+  it("skips invalid AI history JSONL lines while appending remains readable", () => {
+    const historyFile = path.join(tempRoot, ".study-route", "history", "ai-operations.jsonl");
+    fs.mkdirSync(path.dirname(historyFile), { recursive: true });
+    fs.writeFileSync(historyFile, "{bad json}\n", "utf8");
+    const history = readAiOperations();
+    expect(history.operations).toEqual([]);
+    expect(history.warnings[0]).toContain("Skipped invalid AI history line");
   });
 
   it("uploads attachments into the data directory and serves them safely", async () => {

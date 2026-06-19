@@ -3,7 +3,7 @@ import type { FileMeta, RepoSummary, SectionKey, SortMode } from "../../../types
 
 export type ViewMode = "dashboard" | "manager" | "search";
 
-interface AppState {
+export interface AppState {
   summary: RepoSummary | null;
   section: SectionKey;
   view: ViewMode;

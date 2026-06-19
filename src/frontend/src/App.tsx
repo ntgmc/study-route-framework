@@ -1570,6 +1570,8 @@ function DiffDialog({
 function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpen: (file: FileMeta) => Promise<void>; onRefresh: () => Promise<void> }) {
   const setStatus = useAppStore((state) => state.setStatus);
   const execution = summary.execution;
+  const maintenanceRef = useRef<HTMLDetailsElement | null>(null);
+  const focusPanelRef = useRef<HTMLDivElement | null>(null);
   const [focus, setFocus] = useState({
     main_goal: summary.focus[focusLabels.main_goal] || "",
     stage: summary.focus[focusLabels.stage] || "",
@@ -1641,6 +1643,21 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
     setStatus(`已追加路线调整 ${result.path}`);
   }
 
+  const openSource = useCallback(
+    async (file: FileMeta) => {
+      if (file.section === "dashboard") {
+        if (maintenanceRef.current) maintenanceRef.current.open = true;
+        window.requestAnimationFrame(() => {
+          focusPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+        setStatus("已定位到 dashboard 当前焦点");
+        return;
+      }
+      await onOpen(file);
+    },
+    [onOpen, setStatus]
+  );
+
   const nextAction = useMemo(() => {
     if (execution.pendingReviews.length) {
       const item = execution.pendingReviews[0];
@@ -1680,9 +1697,9 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
       title: execution.todayTasks[0]?.title || "继续推进今日任务",
       detail: execution.todayTasks[0] ? `${execution.todayTasks[0].status} · ${execution.todayTasks[0].source.path}` : "现在没有明显缺口，继续做今天的任务就行。",
       label: execution.todayTasks[0] ? "打开任务来源" : "刷新状态",
-      run: () => execution.todayTasks[0] ? onOpen(execution.todayTasks[0].source) : onRefresh()
+      run: () => execution.todayTasks[0] ? openSource(execution.todayTasks[0].source) : onRefresh()
     };
-  }, [execution, onOpen, onRefresh]);
+  }, [execution, onRefresh, openSource]);
 
   const flowSteps = [
     { label: "目标", state: focus.main_goal ? "done" : "empty", detail: focus.main_goal || "未填写" },
@@ -1759,7 +1776,7 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <PriorityBadge value={task.priority} />
-                        <Button type="button" onClick={() => onOpen(task.source).catch((error: Error) => setStatus(error.message, true))}>
+                        <Button type="button" onClick={() => openSource(task.source).catch((error: Error) => setStatus(error.message, true))}>
                           <Eye className="h-4 w-4" />
                           打开
                         </Button>
@@ -1781,7 +1798,7 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
               <div className="grid gap-2">
                 <h4 className="text-sm font-semibold text-muted">当前路线</h4>
                 {execution.routeProgress.length ? execution.routeProgress.map((route) => (
-                  <button key={route.route.path} type="button" className="rounded-lg border border-line bg-white p-3 text-left hover:border-brand" onClick={() => onOpen(route.route).catch((error: Error) => setStatus(error.message, true))}>
+                  <button key={route.route.path} type="button" className="rounded-lg border border-line bg-white p-3 text-left hover:border-brand" onClick={() => openSource(route.route).catch((error: Error) => setStatus(error.message, true))}>
                     <div className="font-semibold [overflow-wrap:anywhere]">{route.currentTheme || route.route.title}</div>
                     <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">阶段 {route.currentStage || "未标记"} · {route.status} · {route.keyTask || "未填写任务"}</div>
                   </button>
@@ -1790,7 +1807,7 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
               <div className="grid gap-2">
                 <h4 className="text-sm font-semibold text-muted">未完成计划</h4>
                 {execution.unfinishedTasks.length ? execution.unfinishedTasks.slice(0, 5).map((task) => (
-                  <button key={task.id} type="button" className="rounded-lg border border-line bg-white p-3 text-left hover:border-brand" onClick={() => onOpen(task.source).catch((error: Error) => setStatus(error.message, true))}>
+                  <button key={task.id} type="button" className="rounded-lg border border-line bg-white p-3 text-left hover:border-brand" onClick={() => openSource(task.source).catch((error: Error) => setStatus(error.message, true))}>
                     <div className="font-semibold [overflow-wrap:anywhere]">{task.title}</div>
                     <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">{task.status} · {task.source.path}{task.dueDate ? ` · ${task.dueDate}` : ""}</div>
                   </button>
@@ -1806,7 +1823,7 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
               <div>
                 <h4 className="mb-2 text-sm font-semibold text-muted">阻塞项</h4>
                 {execution.blockers.length ? execution.blockers.slice(0, 4).map((blocker) => (
-                  <button key={blocker.id} type="button" className="mb-2 w-full rounded-lg border border-line bg-white p-3 text-left hover:border-brand" onClick={() => onOpen(blocker.source).catch((error: Error) => setStatus(error.message, true))}>
+                  <button key={blocker.id} type="button" className="mb-2 w-full rounded-lg border border-line bg-white p-3 text-left hover:border-brand" onClick={() => openSource(blocker.source).catch((error: Error) => setStatus(error.message, true))}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="font-semibold [overflow-wrap:anywhere]">{blocker.problem}</div>
                       <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">{blocker.count} 次</span>
@@ -1818,7 +1835,7 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
               <div>
                 <h4 className="mb-2 text-sm font-semibold text-muted">最近产出</h4>
                 {execution.evidence.length ? execution.evidence.slice(0, 4).map((item) => (
-                  <button key={item.id} type="button" className="mb-2 w-full rounded-lg border border-line bg-white p-3 text-left hover:border-brand" onClick={() => onOpen(item.source).catch((error: Error) => setStatus(error.message, true))}>
+                  <button key={item.id} type="button" className="mb-2 w-full rounded-lg border border-line bg-white p-3 text-left hover:border-brand" onClick={() => openSource(item.source).catch((error: Error) => setStatus(error.message, true))}>
                     <div className="font-semibold [overflow-wrap:anywhere]">{item.title}</div>
                     <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">{item.detail} · {item.source.path}</div>
                   </button>
@@ -1834,7 +1851,7 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
                   <div className="font-semibold [overflow-wrap:anywhere]">{item.plan.title}</div>
                   <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">{item.reason}</div>
                   <div className="mt-3 flex justify-end gap-2">
-                    <Button type="button" onClick={() => onOpen(item.plan).catch((error: Error) => setStatus(error.message, true))}>打开计划</Button>
+                    <Button type="button" onClick={() => openSource(item.plan).catch((error: Error) => setStatus(error.message, true))}>打开计划</Button>
                     <Button type="button" variant="primary" onClick={() => createReviewFromPlan(item.plan.path).catch((error: Error) => setStatus(error.message, true))}>
                       <FilePlus2 className="h-4 w-4" />
                       生成复盘
@@ -1861,19 +1878,21 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
         </div>
       </section>
 
-      <details className="mb-4 rounded-lg border border-line bg-white">
+      <details ref={maintenanceRef} className="mb-4 rounded-lg border border-line bg-white">
         <summary className="cursor-pointer px-4 py-3 font-semibold">手动维护</summary>
-        <Panel title="当前焦点" action={<Button variant="primary" onClick={() => saveFocus().catch((error: Error) => setStatus(error.message, true))}><Check className="h-4 w-4" />保存焦点</Button>}>
-          <div className="grid grid-cols-2 gap-3 p-4 max-[920px]:grid-cols-1">
-            <label className="row-span-2 grid gap-1 text-sm text-muted">
-              主目标
-              <textarea className="min-h-28 rounded-md border border-line p-2 text-ink" value={focus.main_goal} onChange={(event) => setFocus({ ...focus, main_goal: event.target.value })} />
-            </label>
-            <Input label="当前阶段" value={focus.stage} onChange={(value) => setFocus({ ...focus, stage: value })} />
-            <Input label="本周重点" value={focus.week} onChange={(value) => setFocus({ ...focus, week: value })} />
-            <Input label="今日任务" value={focus.today} onChange={(value) => setFocus({ ...focus, today: value })} />
-          </div>
-        </Panel>
+        <div ref={focusPanelRef}>
+          <Panel title="当前焦点" action={<Button variant="primary" onClick={() => saveFocus().catch((error: Error) => setStatus(error.message, true))}><Check className="h-4 w-4" />保存焦点</Button>}>
+            <div className="grid grid-cols-2 gap-3 p-4 max-[920px]:grid-cols-1">
+              <label className="row-span-2 grid gap-1 text-sm text-muted">
+                主目标
+                <textarea className="min-h-28 rounded-md border border-line p-2 text-ink" value={focus.main_goal} onChange={(event) => setFocus({ ...focus, main_goal: event.target.value })} />
+              </label>
+              <Input label="当前阶段" value={focus.stage} onChange={(value) => setFocus({ ...focus, stage: value })} />
+              <Input label="本周重点" value={focus.week} onChange={(value) => setFocus({ ...focus, week: value })} />
+              <Input label="今日任务" value={focus.today} onChange={(value) => setFocus({ ...focus, today: value })} />
+            </div>
+          </Panel>
+        </div>
         <Panel title="追加今日日志" action={<Button variant="primary" onClick={() => appendLog().catch((error: Error) => setStatus(error.message, true))}><Check className="h-4 w-4" />追加</Button>}>
           <div className="grid grid-cols-2 gap-3 p-4 max-[920px]:grid-cols-1">
             <Input label="日期" type="date" value={log.date} onChange={(value) => setLog({ ...log, date: value })} />
@@ -1889,7 +1908,7 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
 
       <details className="rounded-lg border border-line bg-white">
         <summary className="cursor-pointer px-4 py-3 font-semibold">最近更新</summary>
-        <RecentList files={summary.recent} onOpen={onOpen} />
+        <RecentList files={summary.recent} onOpen={openSource} />
       </details>
     </section>
   );

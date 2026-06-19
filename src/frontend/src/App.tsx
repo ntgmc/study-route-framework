@@ -57,6 +57,7 @@ import {
   type DraftVersionRecord,
   type FileMetaRecord
 } from "./drafts";
+import { previewMarkdownContent } from "./markdownPreview";
 import { useAppStore } from "./store";
 import { Button, DialogShell } from "./ui";
 
@@ -1441,7 +1442,7 @@ export function App() {
                       }}
                     >
                       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-                        {content || "没有可预览内容"}
+                        {previewMarkdownContent(content)}
                       </ReactMarkdown>
                     </article>
                     {showPreviewTop ? (

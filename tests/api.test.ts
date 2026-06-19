@@ -7,12 +7,50 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/backend/app.js";
 import { buildMessages } from "../src/backend/llm.js";
 import { AI_ACTIONS, prepareAiWorkflow, readAiOperations } from "../src/backend/aiWorkflow.js";
+import type {
+  AiSettingsResponse,
+  AiStatusResponse,
+  ArchiveFileResponse,
+  CreateFileResponse,
+  FileResponse,
+  FilesResponse,
+  GitStatusResponse,
+  SaveFileResponse,
+  SearchResponse,
+  SummaryResponse
+} from "../types/api.js";
 
 let tempRoot = "";
 
 function write(filePath: string, content: string) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, "utf8");
+}
+
+function contract<T>(value: T): T {
+  return value;
+}
+
+function expectVersioned(body: Record<string, unknown>, includeWorkspace = true) {
+  expect(body.api_version).toBe(1);
+  if (includeWorkspace) expect(body.workspace_schema_version).toBe(0);
+  else expect(body).not.toHaveProperty("workspace_schema_version");
+}
+
+function expectFileMetaContract(meta: Record<string, unknown>, expectedPath?: string) {
+  expect(meta).toEqual(expect.objectContaining({
+    path: expectedPath ?? expect.any(String),
+    name: expect.any(String),
+    title: expect.any(String),
+    section: expect.any(String),
+    updated: expect.any(String),
+    size: expect.any(Number),
+    excerpt: expect.any(String),
+    tags: expect.any(Array),
+    favorite: expect.any(Boolean),
+    pinned: expect.any(Boolean)
+  }));
+  expect((meta.tags as unknown[]).every((tag) => typeof tag === "string")).toBe(true);
 }
 
 function clearAiEnv() {
@@ -131,6 +169,138 @@ describe("api", () => {
 
     const archived = await request(app).post("/api/archive").send({ path: "plans/renamed.md" }).expect(200);
     expect(archived.body.archived_to).toContain(".trash/study-gui");
+  });
+
+  it("preserves frontend API response contracts", async () => {
+    const app = createApp();
+
+    const summary = contract<SummaryResponse>((await request(app).get("/api/summary").expect(200)).body);
+    expectVersioned(summary as unknown as Record<string, unknown>);
+    expect(summary).toEqual(expect.objectContaining({
+      today: expect.any(String),
+      dataRoot: tempRoot,
+      frameworkRoot: expect.any(String),
+      dataMode: "external",
+      sections: expect.any(Array),
+      stats: expect.any(Object),
+      focus: expect.any(Object),
+      recent: expect.any(Array),
+      execution: expect.any(Object)
+    }));
+    expect(summary.sections[0]).toEqual(expect.objectContaining({
+      key: expect.any(String),
+      label: expect.any(String),
+      path: expect.any(String),
+      kind: expect.stringMatching(/^(single|folder)$/),
+      count: expect.any(Number)
+    }));
+    expect(summary.execution).toEqual(expect.objectContaining({
+      week: expect.any(String),
+      todayTasks: expect.any(Array),
+      unfinishedTasks: expect.any(Array),
+      routeProgress: expect.any(Array),
+      blockers: expect.any(Array),
+      evidence: expect.any(Array),
+      pendingReviews: expect.any(Array),
+      suggestions: expect.any(Array)
+    }));
+
+    const files = contract<FilesResponse>((await request(app).get("/api/files?section=plans").expect(200)).body);
+    expectVersioned(files as unknown as Record<string, unknown>);
+    expect(files.files).toHaveLength(1);
+    expectFileMetaContract(files.files[0] as unknown as Record<string, unknown>, "plans/demo.md");
+
+    const file = contract<FileResponse>((await request(app).get("/api/file?path=plans/demo.md").expect(200)).body);
+    expectVersioned(file as unknown as Record<string, unknown>);
+    expectFileMetaContract(file.meta as unknown as Record<string, unknown>, "plans/demo.md");
+    expect(file.content).toContain("hello api");
+
+    const search = contract<SearchResponse>((await request(app).get("/api/search?q=api").expect(200)).body);
+    expectVersioned(search as unknown as Record<string, unknown>);
+    expectFileMetaContract(search.results[0] as unknown as Record<string, unknown>, "plans/demo.md");
+    expect(search.results[0].line).toEqual(expect.any(Number));
+    expect(search.results[0].snippet).toEqual(expect.any(String));
+
+    const saved = contract<SaveFileResponse>((await request(app)
+      .post("/api/file")
+      .send({ path: "plans/demo.md", content: "# Demo\n\ncontract saved" })
+      .expect(200)).body);
+    expectVersioned(saved as unknown as Record<string, unknown>);
+    expect(saved.ok).toBe(true);
+    expectFileMetaContract(saved.meta as unknown as Record<string, unknown>, "plans/demo.md");
+    expect(saved.backup).toEqual(expect.any(String));
+    expect(saved.diff).toEqual(expect.objectContaining({
+      added: expect.any(Number),
+      removed: expect.any(Number),
+      changed: expect.any(Number),
+      preview: expect.any(String)
+    }));
+
+    const created = contract<CreateFileResponse>((await request(app)
+      .post("/api/create")
+      .send({ section: "plans", title: "Contract", name: "" })
+      .expect(201)).body);
+    expectVersioned(created as unknown as Record<string, unknown>);
+    expect(created.ok).toBe(true);
+    expectFileMetaContract(created.meta as unknown as Record<string, unknown>, "plans/Contract.md");
+
+    const archived = contract<ArchiveFileResponse>((await request(app)
+      .post("/api/archive")
+      .send({ path: created.meta.path })
+      .expect(200)).body);
+    expectVersioned(archived as unknown as Record<string, unknown>);
+    expect(archived).toEqual(expect.objectContaining({
+      ok: true,
+      archived_to: expect.stringMatching(/^\.trash\/study-gui\/.+\/plans\/Contract\.md$/)
+    }));
+
+    const git = contract<GitStatusResponse>((await request(app).get("/api/git/status").expect(200)).body);
+    expectVersioned(git as unknown as Record<string, unknown>);
+    expect(git).toEqual(expect.objectContaining({
+      isRepo: expect.any(Boolean),
+      clean: expect.any(Boolean),
+      files: expect.any(Array),
+      conflicts: expect.any(Array)
+    }));
+
+    const aiStatusBody = contract<AiStatusResponse>((await request(app).get("/api/ai/status").expect(200)).body);
+    expectVersioned(aiStatusBody as unknown as Record<string, unknown>, false);
+    expect(aiStatusBody).toEqual(expect.objectContaining({
+      enabled: expect.any(Boolean),
+      configured: expect.any(Boolean),
+      provider: expect.any(String),
+      provider_id: expect.any(String),
+      model: expect.any(String),
+      base_url: expect.any(String),
+      max_tokens: expect.any(Number),
+      temperature: expect.any(Number),
+      required_env: expect.any(String),
+      local_provider: expect.any(Boolean),
+      settings: expect.any(Object),
+      config_source: expect.any(String),
+      env_overrides: expect.any(Array),
+      required_key_env: expect.any(String),
+      api_key_detected: expect.any(Boolean),
+      context_limits: expect.objectContaining({
+        prompt_chars: expect.any(Number),
+        context_chars: expect.any(Number)
+      }),
+      sends_context_fields: expect.any(Array),
+      actions: expect.any(Array)
+    }));
+
+    const aiSettingsBody = contract<AiSettingsResponse>((await request(app).get("/api/ai/settings").expect(200)).body);
+    expectVersioned(aiSettingsBody as unknown as Record<string, unknown>, false);
+    expect(aiSettingsBody).toEqual(expect.objectContaining({
+      settings: expect.any(Object),
+      saved_settings: expect.any(Object),
+      providers: expect.any(Array),
+      actions: expect.any(Array),
+      config_source: expect.any(String),
+      env_overrides: expect.any(Array),
+      required_key_env: expect.any(String),
+      api_key_detected: expect.any(Boolean)
+    }));
   });
 
   it("reports and commits Git workspace snapshots", async () => {

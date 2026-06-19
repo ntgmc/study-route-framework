@@ -145,6 +145,40 @@ describe("markdown store", () => {
     expect(isManagedPath(path.join(tempRoot, "..", "outside.md"))).toBe(false);
   });
 
+  it("rejects unsafe markdown mutations without touching files outside data root", () => {
+    const outsideName = `${path.basename(tempRoot)}-outside.md`;
+    const outsidePath = path.join(path.dirname(tempRoot), outsideName);
+    fs.writeFileSync(outsidePath, "outside", "utf8");
+
+    try {
+      expect(() => getFile(`../${outsideName}`)).toThrow();
+      expect(() => saveFile(`../${outsideName}`, "# hacked")).toThrow();
+      expect(() => updateFileFrontMatter(`../${outsideName}`, { favorite: true })).toThrow();
+      expect(() => archiveFile(`../${outsideName}`)).toThrow();
+      expect(() => archiveFile("dashboard.md")).toThrow();
+
+      expect(fs.readFileSync(outsidePath, "utf8")).toBe("outside");
+      expect(fs.existsSync(path.join(tempRoot, "dashboard.md"))).toBe(true);
+    } finally {
+      fs.rmSync(outsidePath, { force: true });
+    }
+  });
+
+  it("keeps create and rename targets inside managed section directories", () => {
+    const created = createFile("plans", "Escape", "../escape.md");
+    expect(created.meta.path).toBe("plans/escape.md");
+    expect(fs.existsSync(path.join(tempRoot, "plans", "escape.md"))).toBe(true);
+    expect(fs.existsSync(path.join(tempRoot, "escape.md"))).toBe(false);
+
+    const renamed = renameFile("plans/escape.md", "../../renamed.md");
+    expect(renamed.meta.path).toBe("plans/renamed.md");
+    expect(fs.existsSync(path.join(tempRoot, "plans", "renamed.md"))).toBe(true);
+    expect(fs.existsSync(path.join(tempRoot, "renamed.md"))).toBe(false);
+
+    expect(() => renameFile("plans/renamed.md", "demo.md")).toThrow();
+    expect(fs.existsSync(path.join(tempRoot, "plans", "renamed.md"))).toBe(true);
+  });
+
   it("lists, reads, saves, creates, renames, archives, and searches files", () => {
     expect(listMarkdownFiles("plans")).toHaveLength(1);
     expect(getFile("plans/demo.md").content).toContain("keyword");

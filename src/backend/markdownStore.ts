@@ -577,8 +577,9 @@ export function extractTitle(text: string, fallback: string): string {
 }
 
 export function extractExcerpt(text: string): string {
+  const body = parseMarkdownDocument(text).body;
   const lines: string[] = [];
-  for (const line of text.split(/\r?\n/)) {
+  for (const line of body.split(/\r?\n/)) {
     const clean = line.trim();
     if (clean && !clean.startsWith("#") && !clean.startsWith("| ---")) {
       lines.push(clean.replace(/^\|+|\|+$/g, "").trim());
@@ -738,9 +739,12 @@ export function searchFiles(query: string, limit = 50): FileMeta[] {
     if (!`${displayPath(filePath)}\n${text}`.toLocaleLowerCase().includes(needle)) continue;
     let lineNo = 1;
     let snippet = extractExcerpt(text);
-    text.split(/\r?\n/).some((line, index) => {
+    const document = parseMarkdownDocument(text);
+    const searchableBody = document.frontMatterError ? text : document.body;
+    const bodyStartLine = document.rawFrontMatter ? document.rawFrontMatter.split(/\r?\n/).length + 1 : 1;
+    searchableBody.split(/\r?\n/).some((line, index) => {
       if (line.toLocaleLowerCase().includes(needle)) {
-        lineNo = index + 1;
+        lineNo = bodyStartLine + index;
         snippet = line.trim();
         return true;
       }

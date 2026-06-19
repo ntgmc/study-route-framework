@@ -195,6 +195,13 @@ describe("markdown store", () => {
       favorite: false,
       pinned: false
     });
+    expect(meta.excerpt).not.toContain("schema_version");
+    expect(meta.excerpt).toContain("Updated keyword");
+
+    const frontMatterSearch = searchFiles("schema_version");
+    expect(frontMatterSearch[0]).toMatchObject({ path: "plans/demo.md" });
+    expect(frontMatterSearch[0].snippet).not.toContain("schema_version");
+    expect(frontMatterSearch[0].snippet).toContain("Updated keyword");
 
     const created = createFile("plans", "New Plan", "");
     expect(created.meta.path).toBe("plans/New-Plan.md");

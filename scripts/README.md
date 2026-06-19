@@ -12,7 +12,7 @@ All commands read and write the active data root:
 PowerShell example:
 
 ```powershell
-$env:STUDY_ROUTE_DATA_DIR="D:\GITHOME\my-study-route"
+$env:STUDY_ROUTE_DATA_DIR="$HOME\my-study-route"
 ```
 
 Linux/macOS example:

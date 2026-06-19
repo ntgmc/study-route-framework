@@ -101,8 +101,8 @@ my-study-route/
 Windows PowerShell：
 
 ```powershell
-$env:STUDY_ROUTE_DATA_DIR="D:\GITHOME\my-study-route"
-D:\GITHOME\study-route-framework\scripts\study-gui.ps1
+$env:STUDY_ROUTE_DATA_DIR="$HOME\my-study-route"
+.\scripts\study-gui.ps1
 ```
 
 Linux/macOS：
@@ -117,8 +117,8 @@ CLI 使用同一个环境变量：
 Windows PowerShell：
 
 ```powershell
-$env:STUDY_ROUTE_DATA_DIR="D:\GITHOME\my-study-route"
-D:\GITHOME\study-route-framework\scripts\study.ps1 init-log
+$env:STUDY_ROUTE_DATA_DIR="$HOME\my-study-route"
+.\scripts\study.ps1 init-log
 ```
 
 Linux/macOS：

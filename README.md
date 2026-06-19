@@ -102,8 +102,8 @@ Then point the framework at it:
 Windows PowerShell:
 
 ```powershell
-$env:STUDY_ROUTE_DATA_DIR="D:\GITHOME\my-study-route"
-D:\GITHOME\study-route-framework\scripts\study-gui.ps1
+$env:STUDY_ROUTE_DATA_DIR="$HOME\my-study-route"
+.\scripts\study-gui.ps1
 ```
 
 Linux/macOS:
@@ -118,8 +118,8 @@ The CLI uses the same environment variable:
 Windows PowerShell:
 
 ```powershell
-$env:STUDY_ROUTE_DATA_DIR="D:\GITHOME\my-study-route"
-D:\GITHOME\study-route-framework\scripts\study.ps1 init-log
+$env:STUDY_ROUTE_DATA_DIR="$HOME\my-study-route"
+.\scripts\study.ps1 init-log
 ```
 
 Linux/macOS:

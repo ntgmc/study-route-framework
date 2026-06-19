@@ -5,15 +5,25 @@ import {
   editorText,
   openPlan,
   resetE2eWorkspace,
+  startE2eServer,
+  stopE2eServer,
   waitForAppReady,
   writeAiOperation
 } from "./fixtures/workspace";
 
+let server: Awaited<ReturnType<typeof startE2eServer>>;
+
+test.beforeAll(async () => {
+  server = await startE2eServer();
+});
+
+test.afterAll(async () => {
+  await stopE2eServer(server);
+});
+
 test.beforeEach(async ({ page }) => {
   resetE2eWorkspace();
-  const summary = page.waitForResponse((response) => response.url().includes("/api/summary") && response.ok());
-  await page.goto("/");
-  await summary;
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await waitForAppReady(page);
 });
 
@@ -57,18 +67,16 @@ test("restores and discards local drafts", async ({ page, context }) => {
 
   await page.close({ runBeforeUnload: false });
   const restoredPage = await context.newPage();
-  const restoredSummary = restoredPage.waitForResponse((response) => response.url().includes("/api/summary") && response.ok());
-  await restoredPage.goto("/");
-  await restoredSummary;
+  await restoredPage.goto("/", { waitUntil: "domcontentloaded" });
+  await waitForAppReady(restoredPage);
   await expect(restoredPage.getByTestId("toast-message")).toBeVisible();
   await restoredPage.getByTestId("toast-action-restore").click();
   await expect.poll(() => editorText(restoredPage)).toContain(draftLine);
 
   await restoredPage.close({ runBeforeUnload: false });
   const discardPage = await context.newPage();
-  const discardSummary = discardPage.waitForResponse((response) => response.url().includes("/api/summary") && response.ok());
-  await discardPage.goto("/");
-  await discardSummary;
+  await discardPage.goto("/", { waitUntil: "domcontentloaded" });
+  await waitForAppReady(discardPage);
   await expect(discardPage.getByTestId("toast-message")).toBeVisible();
   await discardPage.getByTestId("toast-action-discard").click();
   await expect.poll(() => editorText(discardPage)).not.toContain(draftLine);

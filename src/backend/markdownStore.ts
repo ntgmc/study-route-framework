@@ -284,24 +284,24 @@ function weekId(date = new Date()): string {
   return `${target.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
-function cleanCell(value: string): string {
-  return parseCleanCell(value);
+function cleanCell(value: string | null | undefined): string {
+  return parseCleanCell(value ?? "");
 }
 
-function meaningful(value: string): boolean {
+function meaningful(value: string | null | undefined): boolean {
   const clean = cleanCell(value);
   return Boolean(clean) && !["-", "—", "待填写", "无", "暂无"].includes(clean);
 }
 
-function isDoneStatus(value: string): boolean {
+function isDoneStatus(value: string | null | undefined): boolean {
   return ["已完成", "完成", "done"].includes(cleanCell(value).toLocaleLowerCase());
 }
 
-function taskKey(value: string): string {
+function taskKey(value: string | null | undefined): string {
   return cleanCell(value).toLocaleLowerCase();
 }
 
-function isBlockedStatus(value: string): boolean {
+function isBlockedStatus(value: string | null | undefined): boolean {
   return ["受阻", "阻塞", "落后", "暂停"].some((item) => cleanCell(value).includes(item));
 }
 

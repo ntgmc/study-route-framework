@@ -1,8 +1,32 @@
 import fs from "node:fs";
+import type { Server } from "node:http";
 import path from "node:path";
 import { expect, type Locator, type Page } from "@playwright/test";
+import { createApp } from "../../../src/backend/app";
 
 export const e2eDataDir = path.resolve(".tmp", "e2e-data", "default");
+const e2eHost = "127.0.0.1";
+const e2ePort = 8765;
+
+export async function startE2eServer(): Promise<Server> {
+  process.env.STUDY_ROUTE_DATA_DIR = e2eDataDir;
+  process.env.LLM_DISABLED = "1";
+  const server = createApp().listen(e2ePort, e2eHost);
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  return server;
+}
+
+export async function stopE2eServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
 
 function write(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });

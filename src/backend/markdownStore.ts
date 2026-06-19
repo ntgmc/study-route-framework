@@ -242,6 +242,10 @@ function isDoneStatus(value: string): boolean {
   return ["已完成", "完成", "done"].includes(cleanCell(value).toLocaleLowerCase());
 }
 
+function taskKey(value: string): string {
+  return cleanCell(value).toLocaleLowerCase();
+}
+
 function isBlockedStatus(value: string): boolean {
   return ["受阻", "阻塞", "落后", "暂停"].some((item) => cleanCell(value).includes(item));
 }
@@ -262,6 +266,34 @@ function bulletItems(text: string, heading: string): Array<{ text: string; check
   return parseTaskItems(text, heading).filter((item) => meaningful(item.text));
 }
 
+function collectCompletedTaskKeys(): Set<string> {
+  const completed = new Set<string>();
+  const addTask = (title: string) => {
+    if (meaningful(title)) completed.add(taskKey(title));
+  };
+
+  for (const filePath of filePathsForSection("logs")) {
+    for (const row of tableRows(readText(filePath), "今日完成")) {
+      const [title = "", result = "", , evidence = ""] = row.cells;
+      if (isDoneStatus(result) || meaningful(evidence)) addTask(title);
+    }
+  }
+
+  for (const filePath of filePathsForSection("reviews")) {
+    const text = readText(filePath);
+    for (const row of tableRows(text, "完成情况")) {
+      const [title = "", result = "", diff = ""] = row.cells;
+      if (isDoneStatus(result) || isDoneStatus(diff)) addTask(title);
+    }
+    for (const row of tableRows(text, "关键产出")) {
+      const [, title = "", result = "", evidence = ""] = row.cells;
+      if (isDoneStatus(result) || meaningful(evidence)) addTask(title);
+    }
+  }
+
+  return completed;
+}
+
 function managedPathInText(text: string, section: string): string | undefined {
   const match = text.match(new RegExp(`${section}/[^\\s\`，。|)）]+\\.md`));
   return match?.[0];
@@ -275,13 +307,13 @@ function sourceDetail(line: number | undefined, fallback: string): string {
   return line ? `${fallback} · 第 ${line} 行` : fallback;
 }
 
-function parsePlanTasks(filePath: string, today: string): ExecutionTask[] {
+function parsePlanTasks(filePath: string, today: string, completedTasks = new Set<string>()): ExecutionTask[] {
   const meta = fileMeta(filePath);
   const text = readText(filePath);
   const tasks: ExecutionTask[] = [];
   for (const row of tableRows(text, "任务安排")) {
     const [dueDate = "", title = "", estimate = "", output = "", status = ""] = row.cells;
-    if (!meaningful(title) || isDoneStatus(status)) continue;
+    if (!meaningful(title) || isDoneStatus(status) || completedTasks.has(taskKey(title))) continue;
     const priority = dueDate === today || isBlockedStatus(status) ? "high" : "medium";
     tasks.push({
       id: `${meta.path}:${row.line}:${title}`,
@@ -295,7 +327,7 @@ function parsePlanTasks(filePath: string, today: string): ExecutionTask[] {
     });
   }
   for (const item of bulletItems(text, "每日最低动作")) {
-    if (item.checked) continue;
+    if (item.checked || completedTasks.has(taskKey(item.text))) continue;
     tasks.push({
       id: `${meta.path}:${item.line}:${item.text}`,
       title: item.text,
@@ -505,10 +537,11 @@ export function executionSummary(): ExecutionSummary {
   const focus = dashboardFocus();
   const plans = listMarkdownFiles("plans", "", "updated");
   const activePlan = plans[0];
-  const planTasks = filePathsForSection("plans").flatMap((filePath) => parsePlanTasks(filePath, today));
+  const completedTasks = collectCompletedTaskKeys();
+  const planTasks = filePathsForSection("plans").flatMap((filePath) => parsePlanTasks(filePath, today, completedTasks));
   const dashboardTask = focus["今日任务"];
   const todayTasks = [
-    ...(meaningful(dashboardTask)
+    ...(meaningful(dashboardTask) && !completedTasks.has(taskKey(dashboardTask))
       ? [{
           id: "dashboard:today",
           title: dashboardTask,
@@ -761,19 +794,20 @@ export function repoSummary(): RepoSummary {
 }
 
 export function replaceFocusLine(text: string, label: string, value: string): string {
-  if (!value.trim()) return text;
   const target = `- ${label}：`;
+  const clean = value.trim();
   const lines = text.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     if (lines[index].startsWith(target)) {
-      lines[index] = `${target}${value.trim()}`;
+      lines[index] = `${target}${clean}`;
       return `${lines.join("\n").replace(/\n*$/, "")}\n`;
     }
   }
+  if (!clean) return text;
   const marker = "## 当前焦点";
   const markerIndex = lines.findIndex((line) => line.trim() === marker);
   if (markerIndex >= 0) {
-    lines.splice(markerIndex + 1, 0, "", `${target}${value.trim()}`);
+    lines.splice(markerIndex + 1, 0, "", `${target}${clean}`);
     return `${lines.join("\n").replace(/\n*$/, "")}\n`;
   }
   throw new Error("dashboard.md 中找不到“当前焦点”章节");

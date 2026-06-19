@@ -209,6 +209,9 @@ describe("markdown store", () => {
     expect(focus.focus["今日任务"]).toBe("新任务");
     expect(focus.focus["当前阶段"]).toBe("旧阶段");
 
+    const cleared = updateDashboardFocus({ today: "" });
+    expect(cleared.focus["今日任务"]).toBe("");
+
     const log = appendDailyLog({
       date: "2026-06-17",
       task: "Task",
@@ -227,7 +230,9 @@ describe("markdown store", () => {
 
   it("builds an execution summary from routes, plans, logs, and reviews", () => {
     const summary = executionSummary();
-    expect(summary.todayTasks.map((item) => item.title)).toEqual(expect.arrayContaining(["旧任务", "Build dashboard", "Daily note"]));
+    expect(summary.todayTasks.map((item) => item.title)).toEqual(expect.arrayContaining(["旧任务", "Daily note"]));
+    expect(summary.todayTasks.map((item) => item.title)).not.toContain("Build dashboard");
+    expect(summary.unfinishedTasks.map((item) => item.title)).not.toContain("Build dashboard");
     expect(summary.unfinishedTasks.map((item) => item.title)).toContain("Old task");
     expect(summary.routeProgress[0]).toMatchObject({
       currentTheme: "Dashboard 闭环",
@@ -238,6 +243,14 @@ describe("markdown store", () => {
     expect(summary.evidence.map((item) => item.title)).toContain("demo link");
     expect(summary.pendingReviews[0]).toMatchObject({ reviewPath: "reviews/demo.md", status: "missing" });
     expect(summary.suggestions.map((item) => item.id)).toEqual(expect.arrayContaining(["blocker-adjustment", "unfinished-plan-adjustment", "review-adjustment"]));
+  });
+
+  it("hides completed dashboard focus tasks from execution summary", () => {
+    updateDashboardFocus({ today: "Build dashboard" });
+
+    const summary = executionSummary();
+
+    expect(summary.todayTasks.map((item) => item.title)).not.toContain("Build dashboard");
   });
 
   it("generates plan, log, review, and route adjustment files without overwriting existing content", () => {

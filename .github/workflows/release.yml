@@ -1,0 +1,215 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to publish, for example v2.0.0. It must match package.json."
+        required: true
+        type: string
+      draft:
+        description: "Create or update the GitHub Release as a draft."
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: "Mark the GitHub Release as a prerelease."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Validate and publish release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Resolve release metadata
+        id: metadata
+        shell: pwsh
+        run: |
+          $packageVersion = node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version"
+          $expectedTag = "v$packageVersion"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tagName = "${{ inputs.tag_name }}"
+          } else {
+            $tagName = "${{ github.ref_name }}"
+          }
+
+          if ($tagName -ne $expectedTag) {
+            throw "Release tag '$tagName' must match package.json version '$expectedTag'."
+          }
+
+          $assetName = "study-route-framework-$tagName.zip"
+          "tag_name=$tagName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build application
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+
+      - name: Run E2E tests
+        run: npm run test:e2e:run
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Package release artifact
+        shell: pwsh
+        run: |
+          $assetName = "${{ steps.metadata.outputs.asset_name }}"
+          $paths = @(
+            "dist",
+            "package.json",
+            "package-lock.json",
+            "README.md",
+            "README.zh-CN.md",
+            "LICENSE",
+            "scripts",
+            "templates",
+            "demo-data"
+          )
+
+          Compress-Archive -Path $paths -DestinationPath $assetName -Force
+
+      - name: Upload release artifact to workflow run
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.metadata.outputs.asset_name }}
+          path: ${{ steps.metadata.outputs.asset_name }}
+          if-no-files-found: error
+
+      - name: Generate changelog and publish GitHub Release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG_NAME: ${{ steps.metadata.outputs.tag_name }}
+          RELEASE_ASSET_NAME: ${{ steps.metadata.outputs.asset_name }}
+          RELEASE_DRAFT: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          RELEASE_PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tagName = process.env.RELEASE_TAG_NAME;
+            const assetName = process.env.RELEASE_ASSET_NAME;
+            const draft = process.env.RELEASE_DRAFT === "true";
+            const prerelease = process.env.RELEASE_PRERELEASE === "true";
+
+            const generated = await github.rest.repos.generateReleaseNotes({
+              owner,
+              repo,
+              tag_name: tagName,
+              target_commitish: context.sha,
+            });
+
+            let release;
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag: tagName,
+              });
+
+              const updated = await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: existing.data.id,
+                tag_name: tagName,
+                name: generated.data.name || tagName,
+                body: generated.data.body,
+                draft,
+                prerelease,
+              });
+              release = updated.data;
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              const created = await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tagName,
+                target_commitish: context.sha,
+                name: generated.data.name || tagName,
+                body: generated.data.body,
+                draft,
+                prerelease,
+                generate_release_notes: false,
+              });
+              release = created.data;
+            }
+
+            const assets = await github.rest.repos.listReleaseAssets({
+              owner,
+              repo,
+              release_id: release.id,
+              per_page: 100,
+            });
+
+            for (const asset of assets.data) {
+              if (asset.name === assetName) {
+                await github.rest.repos.deleteReleaseAsset({
+                  owner,
+                  repo,
+                  asset_id: asset.id,
+                });
+              }
+            }
+
+            const assetPath = path.join(process.env.GITHUB_WORKSPACE, assetName);
+            const data = fs.readFileSync(assetPath);
+            await github.rest.repos.uploadReleaseAsset({
+              owner,
+              repo,
+              release_id: release.id,
+              name: assetName,
+              data,
+              headers: {
+                "content-type": "application/zip",
+                "content-length": data.length,
+              },
+            });
+
+            await core.summary
+              .addHeading(`Published ${tagName}`)
+              .addLink("GitHub Release", release.html_url)
+              .addRaw("\n")
+              .addRaw(`Uploaded asset: ${assetName}`)
+              .write();

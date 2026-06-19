@@ -33,6 +33,8 @@ Resolution order:
 
 That means a fresh public clone can run immediately with demo data, while personal data stays in a private repository.
 
+The Web GUI shows the active data mode, data root, and framework root in the sidebar so you can confirm where files are written before editing.
+
 ## Quick Start With Demo Data
 
 From the framework repository:
@@ -166,7 +168,7 @@ Recommended workflow:
 
 ## Optional AI Generation
 
-The Web GUI can call OpenAI-compatible chat completion APIs when configured through environment variables. API keys are never saved by the framework.
+The Web GUI can call OpenAI-compatible chat completion APIs when configured through environment variables. API keys are never saved by the framework, the data root, or browser storage. The AI dialog also shows the provider, model, target URL, current file path, prompt size, and whether editor content will be sent before you generate.
 
 Provider-neutral configuration works with any compatible API:
 
@@ -194,13 +196,37 @@ Built-in provider shortcuts are also supported:
 - OpenAI: `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, `OPENAI_MODEL`
 - OpenRouter: `OPENROUTER_API_KEY`, optional `OPENROUTER_BASE_URL`, `OPENROUTER_MODEL`
 - SiliconFlow: `SILICONFLOW_API_KEY`, optional `SILICONFLOW_BASE_URL`, `SILICONFLOW_MODEL`
+- Ollama: `LLM_PROVIDER=ollama`, `OLLAMA_MODEL`, optional `OLLAMA_BASE_URL` defaulting to `http://127.0.0.1:11434/v1`
+- LM Studio: `LLM_PROVIDER=lmstudio`, `LMSTUDIO_MODEL`, optional `LMSTUDIO_BASE_URL` defaulting to `http://127.0.0.1:1234/v1`
+
+Local model examples:
+
+```powershell
+$env:LLM_PROVIDER="ollama"
+$env:OLLAMA_MODEL="llama3.1"
+.\scripts\study-gui.ps1
+```
+
+```sh
+export LLM_PROVIDER="lmstudio"
+export LMSTUDIO_MODEL="local-model"
+sh scripts/study-gui.sh
+```
+
+To fully disable AI while keeping the editor usable:
+
+```powershell
+$env:LLM_DISABLED="1"
+.\scripts\study-gui.ps1
+```
 
 Global `LLM_*` variables override provider-specific variables:
 
-- `LLM_PROVIDER`, one of `deepseek`, `openai`, `openrouter`, `siliconflow`, or `custom`
+- `LLM_PROVIDER`, one of `deepseek`, `openai`, `openrouter`, `siliconflow`, `custom`, `ollama`, `lmstudio`, `disabled`, `off`, or `none`
 - `LLM_API_KEY`
 - `LLM_BASE_URL`
 - `LLM_MODEL`
+- `LLM_DISABLED`, set to `1`, `true`, `yes`, or `on` to block AI requests
 - `LLM_TIMEOUT`, default `60`
 - `LLM_MAX_TOKENS`, default `1800`
 - `LLM_TEMPERATURE`, default `0.4`

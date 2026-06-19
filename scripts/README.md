@@ -140,7 +140,7 @@ http://127.0.0.1:5173
 
 ## AI Generation
 
-The GUI does not store API keys. Set provider variables in the terminal before startup.
+The GUI does not store API keys in the framework, data root, or browser storage. Set provider variables in the terminal before startup. The AI dialog shows which provider, URL, file path, prompt size, and editor context will be sent before generation.
 
 Generic OpenAI-compatible API:
 
@@ -184,6 +184,35 @@ $env:SILICONFLOW_API_KEY="your-api-key"
 $env:SILICONFLOW_MODEL="deepseek-ai/DeepSeek-V3"
 ```
 
+Local OpenAI-compatible providers do not require an API key:
+
+```powershell
+$env:LLM_PROVIDER="ollama"
+$env:OLLAMA_MODEL="llama3.1"
+.\scripts\study-gui.ps1
+```
+
+```powershell
+$env:LLM_PROVIDER="lmstudio"
+$env:LMSTUDIO_MODEL="local-model"
+.\scripts\study-gui.ps1
+```
+
+Linux/macOS:
+
+```sh
+export LLM_PROVIDER="ollama"
+export OLLAMA_MODEL="llama3.1"
+sh scripts/study-gui.sh
+```
+
+To disable AI requests completely:
+
+```powershell
+$env:LLM_DISABLED="1"
+.\scripts\study-gui.ps1
+```
+
 Global options:
 
 ```powershell
@@ -191,6 +220,8 @@ $env:LLM_TIMEOUT="60"
 $env:LLM_MAX_TOKENS="1800"
 $env:LLM_TEMPERATURE="0.4"
 ```
+
+`LLM_PROVIDER` also accepts `ollama`, `lmstudio`, `disabled`, `off`, or `none`. `LLM_DISABLED=1` takes precedence over provider selection.
 
 ## CLI Commands
 

@@ -5,13 +5,13 @@ const DEFAULT_MODEL = "deepseek-v4-flash";
 const DEFAULT_TIMEOUT = 60;
 const DEFAULT_MAX_TOKENS = 1800;
 const DEFAULT_TEMPERATURE = 0.4;
-const MAX_PROMPT_CHARS = 4000;
-const MAX_CONTEXT_CHARS = 12000;
+export const MAX_PROMPT_CHARS = 4000;
+export const MAX_CONTEXT_CHARS = 12000;
 
 export class LlmConfigError extends Error {}
 export class LlmRequestError extends Error {}
 
-type LlmProviderId = "deepseek" | "openai" | "openrouter" | "siliconflow" | "custom";
+type LlmProviderId = "deepseek" | "openai" | "openrouter" | "siliconflow" | "custom" | "ollama" | "lmstudio";
 
 interface ProviderProfile {
   id: LlmProviderId;
@@ -21,12 +21,15 @@ interface ProviderProfile {
   modelEnv: string;
   defaultBaseUrl: string;
   defaultModel: string;
+  apiKeyRequired: boolean;
+  localProvider: boolean;
   extraBody?: Record<string, unknown>;
 }
 
 interface LlmConfig {
+  enabled: boolean;
   configured: boolean;
-  providerId: LlmProviderId;
+  providerId: LlmProviderId | "disabled";
   provider: string;
   apiKey: string;
   baseUrl: string;
@@ -35,6 +38,8 @@ interface LlmConfig {
   maxTokens: number;
   temperature: number;
   requiredEnv: string;
+  disabledReason?: string;
+  localProvider: boolean;
   extraBody?: Record<string, unknown>;
 }
 
@@ -47,6 +52,8 @@ const PROVIDERS: Record<LlmProviderId, ProviderProfile> = {
     modelEnv: "DEEPSEEK_MODEL",
     defaultBaseUrl: DEFAULT_BASE_URL,
     defaultModel: DEFAULT_MODEL,
+    apiKeyRequired: true,
+    localProvider: false,
     extraBody: { thinking: { type: "disabled" } }
   },
   openai: {
@@ -56,7 +63,9 @@ const PROVIDERS: Record<LlmProviderId, ProviderProfile> = {
     baseUrlEnv: "OPENAI_BASE_URL",
     modelEnv: "OPENAI_MODEL",
     defaultBaseUrl: "https://api.openai.com/v1",
-    defaultModel: "gpt-4o-mini"
+    defaultModel: "gpt-4o-mini",
+    apiKeyRequired: true,
+    localProvider: false
   },
   openrouter: {
     id: "openrouter",
@@ -65,7 +74,9 @@ const PROVIDERS: Record<LlmProviderId, ProviderProfile> = {
     baseUrlEnv: "OPENROUTER_BASE_URL",
     modelEnv: "OPENROUTER_MODEL",
     defaultBaseUrl: "https://openrouter.ai/api/v1",
-    defaultModel: "openai/gpt-4o-mini"
+    defaultModel: "openai/gpt-4o-mini",
+    apiKeyRequired: true,
+    localProvider: false
   },
   siliconflow: {
     id: "siliconflow",
@@ -74,7 +85,9 @@ const PROVIDERS: Record<LlmProviderId, ProviderProfile> = {
     baseUrlEnv: "SILICONFLOW_BASE_URL",
     modelEnv: "SILICONFLOW_MODEL",
     defaultBaseUrl: "https://api.siliconflow.cn/v1",
-    defaultModel: "deepseek-ai/DeepSeek-V3"
+    defaultModel: "deepseek-ai/DeepSeek-V3",
+    apiKeyRequired: true,
+    localProvider: false
   },
   custom: {
     id: "custom",
@@ -83,7 +96,31 @@ const PROVIDERS: Record<LlmProviderId, ProviderProfile> = {
     baseUrlEnv: "LLM_BASE_URL",
     modelEnv: "LLM_MODEL",
     defaultBaseUrl: "",
-    defaultModel: ""
+    defaultModel: "",
+    apiKeyRequired: true,
+    localProvider: false
+  },
+  ollama: {
+    id: "ollama",
+    label: "Ollama",
+    apiKeyEnv: "OLLAMA_API_KEY",
+    baseUrlEnv: "OLLAMA_BASE_URL",
+    modelEnv: "OLLAMA_MODEL",
+    defaultBaseUrl: "http://127.0.0.1:11434/v1",
+    defaultModel: "",
+    apiKeyRequired: false,
+    localProvider: true
+  },
+  lmstudio: {
+    id: "lmstudio",
+    label: "LM Studio",
+    apiKeyEnv: "LMSTUDIO_API_KEY",
+    baseUrlEnv: "LMSTUDIO_BASE_URL",
+    modelEnv: "LMSTUDIO_MODEL",
+    defaultBaseUrl: "http://127.0.0.1:1234/v1",
+    defaultModel: "",
+    apiKeyRequired: false,
+    localProvider: true
   }
 };
 
@@ -107,7 +144,17 @@ function normalizeProvider(value: string | undefined): LlmProviderId | undefined
   if (normalized === "openrouter") return "openrouter";
   if (normalized === "siliconflow" || normalized === "silicon-flow") return "siliconflow";
   if (normalized === "custom" || normalized === "openai-compatible" || normalized === "compatible") return "custom";
+  if (normalized === "ollama") return "ollama";
+  if (normalized === "lmstudio" || normalized === "lm-studio") return "lmstudio";
   return "custom";
+}
+
+function disabledReason(): string | undefined {
+  const disabled = (process.env.LLM_DISABLED ?? "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(disabled)) return "LLM_DISABLED 已启用，AI 请求已关闭";
+  const provider = (process.env.LLM_PROVIDER ?? "").trim().toLowerCase().replace(/[_\s]+/g, "-");
+  if (["disabled", "off", "none"].includes(provider)) return "LLM_PROVIDER 已设置为关闭，AI 请求已关闭";
+  return undefined;
 }
 
 function inferProvider(): LlmProviderId {
@@ -117,6 +164,8 @@ function inferProvider(): LlmProviderId {
     (process.env.OPENAI_API_KEY ? "openai" : undefined) ??
     (process.env.OPENROUTER_API_KEY ? "openrouter" : undefined) ??
     (process.env.SILICONFLOW_API_KEY ? "siliconflow" : undefined) ??
+    (process.env.OLLAMA_MODEL || process.env.OLLAMA_BASE_URL ? "ollama" : undefined) ??
+    (process.env.LMSTUDIO_MODEL || process.env.LMSTUDIO_BASE_URL ? "lmstudio" : undefined) ??
     "deepseek"
   );
 }
@@ -126,16 +175,35 @@ function cleanBaseUrl(value: string): string {
 }
 
 function envConfig(): LlmConfig {
+  const disabled = disabledReason();
+  if (disabled) {
+    return {
+      enabled: false,
+      configured: false,
+      providerId: "disabled",
+      provider: "AI Disabled",
+      apiKey: "",
+      baseUrl: "",
+      model: "",
+      timeout: DEFAULT_TIMEOUT,
+      maxTokens: DEFAULT_MAX_TOKENS,
+      temperature: DEFAULT_TEMPERATURE,
+      requiredEnv: "移除 LLM_DISABLED 或 LLM_PROVIDER=disabled/off/none",
+      disabledReason: disabled,
+      localProvider: false
+    };
+  }
   const providerId = inferProvider();
   const profile = PROVIDERS[providerId];
   const apiKey = (process.env.LLM_API_KEY ?? process.env[profile.apiKeyEnv] ?? "").trim();
   const baseUrl = cleanBaseUrl(process.env.LLM_BASE_URL ?? process.env[profile.baseUrlEnv] ?? profile.defaultBaseUrl);
   const model = (process.env.LLM_MODEL ?? process.env[profile.modelEnv] ?? profile.defaultModel).trim();
-  const configured = Boolean(apiKey && baseUrl && model);
+  const configured = Boolean((apiKey || !profile.apiKeyRequired) && baseUrl && model);
   const timeout = parseIntEnv(process.env.LLM_TIMEOUT ?? process.env[`${profile.apiKeyEnv.replace(/_API_KEY$/, "")}_TIMEOUT`], DEFAULT_TIMEOUT);
   const maxTokens = parseIntEnv(process.env.LLM_MAX_TOKENS ?? process.env[`${profile.apiKeyEnv.replace(/_API_KEY$/, "")}_MAX_TOKENS`], DEFAULT_MAX_TOKENS);
   const temperature = parseFloatEnv(process.env.LLM_TEMPERATURE ?? process.env[`${profile.apiKeyEnv.replace(/_API_KEY$/, "")}_TEMPERATURE`], DEFAULT_TEMPERATURE);
   return {
+    enabled: true,
     configured,
     providerId,
     provider: profile.label,
@@ -145,7 +213,12 @@ function envConfig(): LlmConfig {
     timeout,
     maxTokens,
     temperature,
-    requiredEnv: providerId === "custom" ? "LLM_API_KEY + LLM_BASE_URL + LLM_MODEL" : `${profile.apiKeyEnv} 或 LLM_API_KEY`,
+    requiredEnv: providerId === "custom"
+      ? "LLM_API_KEY + LLM_BASE_URL + LLM_MODEL"
+      : profile.apiKeyRequired
+        ? `${profile.apiKeyEnv} 或 LLM_API_KEY`
+        : `${profile.modelEnv} 或 LLM_MODEL`,
+    localProvider: profile.localProvider,
     extraBody: profile.extraBody
   };
 }
@@ -153,6 +226,7 @@ function envConfig(): LlmConfig {
 export function aiStatus(): AiStatusResponse {
   const cfg = envConfig();
   return {
+    enabled: cfg.enabled,
     configured: cfg.configured,
     provider: cfg.provider,
     provider_id: cfg.providerId,
@@ -160,7 +234,14 @@ export function aiStatus(): AiStatusResponse {
     base_url: cfg.baseUrl,
     max_tokens: cfg.maxTokens,
     temperature: cfg.temperature,
-    required_env: cfg.requiredEnv
+    required_env: cfg.requiredEnv,
+    disabled_reason: cfg.disabledReason,
+    local_provider: cfg.localProvider,
+    context_limits: {
+      prompt_chars: MAX_PROMPT_CHARS,
+      context_chars: MAX_CONTEXT_CHARS
+    },
+    sends_context_fields: ["mode", "prompt", "section", "path", "context"]
   };
 }
 
@@ -268,20 +349,24 @@ function summarizeError(detail: string): string {
 
 export async function generateMarkdown(payload: Record<string, string>): Promise<AiGenerateResponse> {
   const cfg = envConfig();
+  if (!cfg.enabled) {
+    throw new LlmConfigError(cfg.disabledReason ?? "AI 请求已关闭");
+  }
   if (!cfg.configured) {
     throw new LlmConfigError(`未配置 ${cfg.requiredEnv}，请先在启动服务的终端中设置环境变量`);
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), cfg.timeout * 1000);
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json"
+    };
+    if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
     const response = await fetch(`${cfg.baseUrl}/chat/completions`, {
       method: "POST",
       signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${cfg.apiKey}`,
-        "Content-Type": "application/json",
-        Accept: "application/json"
-      },
+      headers,
       body: JSON.stringify({
         model: cfg.model,
         messages: buildMessages(payload),

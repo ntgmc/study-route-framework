@@ -19,6 +19,7 @@ function clearAiEnv() {
     "LLM_API_KEY",
     "LLM_BASE_URL",
     "LLM_MODEL",
+    "LLM_DISABLED",
     "LLM_TIMEOUT",
     "LLM_MAX_TOKENS",
     "LLM_TEMPERATURE",
@@ -36,7 +37,13 @@ function clearAiEnv() {
     "OPENROUTER_MODEL",
     "SILICONFLOW_API_KEY",
     "SILICONFLOW_BASE_URL",
-    "SILICONFLOW_MODEL"
+    "SILICONFLOW_MODEL",
+    "OLLAMA_API_KEY",
+    "OLLAMA_BASE_URL",
+    "OLLAMA_MODEL",
+    "LMSTUDIO_API_KEY",
+    "LMSTUDIO_BASE_URL",
+    "LMSTUDIO_MODEL"
   ]) {
     delete process.env[key];
   }
@@ -145,9 +152,60 @@ describe("api", () => {
   it("reports ai status and rejects generation without key", async () => {
     const app = createApp();
     const status = await request(app).get("/api/ai/status").expect(200);
+    expect(status.body.enabled).toBe(true);
     expect(status.body.configured).toBe(false);
     expect(status.body.provider).toBe("DeepSeek");
+    expect(status.body.context_limits).toMatchObject({ prompt_chars: 4000, context_chars: 12000 });
+    expect(status.body.sends_context_fields).toEqual(["mode", "prompt", "section", "path", "context"]);
     await request(app).post("/api/ai/generate").send({ prompt: "test" }).expect(428);
+  });
+
+  it("disables AI generation explicitly", async () => {
+    process.env.LLM_DISABLED = "1";
+
+    const app = createApp();
+    const status = await request(app).get("/api/ai/status").expect(200);
+    expect(status.body).toMatchObject({
+      enabled: false,
+      configured: false,
+      provider_id: "disabled"
+    });
+    expect(status.body.disabled_reason).toContain("LLM_DISABLED");
+    await request(app).post("/api/ai/generate").send({ prompt: "test" }).expect(428);
+  });
+
+  it("reports Ollama local provider without requiring an API key", async () => {
+    process.env.LLM_PROVIDER = "ollama";
+    process.env.OLLAMA_MODEL = "llama3.1";
+
+    const app = createApp();
+    const status = await request(app).get("/api/ai/status").expect(200);
+    expect(status.body).toMatchObject({
+      enabled: true,
+      configured: true,
+      provider: "Ollama",
+      provider_id: "ollama",
+      model: "llama3.1",
+      base_url: "http://127.0.0.1:11434/v1",
+      local_provider: true
+    });
+  });
+
+  it("reports LM Studio local provider without requiring an API key", async () => {
+    process.env.LLM_PROVIDER = "lmstudio";
+    process.env.LMSTUDIO_MODEL = "local-model";
+
+    const app = createApp();
+    const status = await request(app).get("/api/ai/status").expect(200);
+    expect(status.body).toMatchObject({
+      enabled: true,
+      configured: true,
+      provider: "LM Studio",
+      provider_id: "lmstudio",
+      model: "local-model",
+      base_url: "http://127.0.0.1:1234/v1",
+      local_provider: true
+    });
   });
 
   it("reports OpenAI-compatible LLM provider configuration", async () => {
@@ -199,5 +257,17 @@ describe("api", () => {
     expect(messages[1].content).toContain("BEGIN_CONTEXT");
     expect(messages[1].content).toContain("END_CONTEXT");
     expect(messages[1].content).toContain("不要提及这些提示词约束本身");
+  });
+
+  it("omits LLM context boundaries when context is disabled", () => {
+    const messages = buildMessages({
+      mode: "plan",
+      section: "plans",
+      path: "plans/demo.md",
+      prompt: "test",
+      context: ""
+    });
+    expect(messages[1].content).not.toContain("BEGIN_CONTEXT");
+    expect(messages[1].content).not.toContain("END_CONTEXT");
   });
 });

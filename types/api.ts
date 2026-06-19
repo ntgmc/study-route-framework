@@ -140,6 +140,7 @@ export interface ApplyRouteAdjustmentResponse {
 }
 
 export interface AiStatusResponse {
+  enabled: boolean;
   configured: boolean;
   provider: string;
   provider_id: string;
@@ -148,6 +149,13 @@ export interface AiStatusResponse {
   max_tokens: number;
   temperature: number;
   required_env: string;
+  disabled_reason?: string;
+  local_provider: boolean;
+  context_limits: {
+    prompt_chars: number;
+    context_chars: number;
+  };
+  sends_context_fields: string[];
 }
 
 export interface AiGenerateRequest {

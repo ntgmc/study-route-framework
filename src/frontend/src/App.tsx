@@ -964,6 +964,7 @@ export function App() {
 
   const activeInfo = summary?.sections.find((item) => item.key === section);
   const source = summary?.dataMode === "external" ? "外部数据" : "Demo 数据";
+  const isDemoData = summary?.dataMode !== "external";
   const currentInlineTags = useMemo(() => extractInlineTags(content), [content]);
   const currentTags = useMemo(() => {
     const localTags = currentMetaRecord?.tags ?? [];
@@ -1007,6 +1008,29 @@ export function App() {
             </button>
           ))}
         </nav>
+        {summary ? (
+          <section className="mt-4 rounded-md border border-white/10 bg-white/5 p-3 text-xs">
+            <div className="mb-2 flex items-center gap-2 font-medium text-slate-100">
+              <Folder className="h-4 w-4" />
+              当前数据目录
+            </div>
+            <div className="grid gap-2 text-slate-300">
+              <div>
+                <div className="text-slate-400">数据模式</div>
+                <div className={isDemoData ? "font-medium text-amber-200" : "font-medium text-emerald-200"}>{source}</div>
+              </div>
+              <div>
+                <div className="text-slate-400">资料写入位置</div>
+                <div className="break-words font-mono text-[11px] leading-5 text-slate-100">{summary.dataRoot}</div>
+              </div>
+              <div>
+                <div className="text-slate-400">框架目录</div>
+                <div className="break-words font-mono text-[11px] leading-5">{summary.frameworkRoot}</div>
+              </div>
+              {isDemoData ? <div className="rounded-md bg-amber-400/10 p-2 text-amber-100">当前使用 Demo 数据，仅适合示例体验；长期使用请设置 STUDY_ROUTE_DATA_DIR。</div> : null}
+            </div>
+          </section>
+        ) : null}
       </aside>
 
       <main className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
@@ -1014,11 +1038,7 @@ export function App() {
           <div className="min-w-0">
             <h2 className="truncate text-xl font-semibold">{view === "search" ? "全局搜索" : activeInfo?.label || "总览"}</h2>
             <p className="truncate text-xs text-muted">
-              {view === "search"
-                ? `${searchResults.length} 个结果`
-                : activeInfo
-                  ? `${activeInfo.count} 个文件 · ${source} · ${summary?.dataRoot || ""}`
-                  : "加载中"}
+              {view === "search" ? `${searchResults.length} 个结果` : activeInfo ? `${activeInfo.count} 个文件 · ${source}` : "加载中"}
             </p>
           </div>
           <div className="flex items-center gap-2 max-[920px]:flex-col max-[920px]:items-stretch">

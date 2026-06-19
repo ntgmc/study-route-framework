@@ -233,11 +233,11 @@ describe("markdown store", () => {
     const adjustment = applyRouteAdjustment({
       routePath: "routes/demo.md",
       date: "2026-06-19",
-      suggestion: "收敛当前阶段任务",
+      suggestion: "本周先少做一点",
       reason: "存在未完成计划"
     });
     expect(adjustment.backup).toContain(".backups/study-gui");
     const route = fs.readFileSync(path.join(tempRoot, "routes", "demo.md"), "utf8");
-    expect(route).toContain("| 2026-06-19 | 收敛当前阶段任务 | 存在未完成计划 |");
+    expect(route).toContain("| 2026-06-19 | 本周先少做一点 | 存在未完成计划 |");
   });
 });

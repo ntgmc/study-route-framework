@@ -411,8 +411,8 @@ function collectPendingReviews(plans: FileMeta[]): ExecutionReviewItem[] {
         id: `${plan.path}:review`,
         plan,
         reviewPath,
-        status: "missing" as const,
-        reason: "计划已有复盘入口，但还没有对应复盘文件"
+      status: "missing" as const,
+      reason: "计划已有复盘入口，但还没有对应复盘文件"
       };
     }
     const reviewText = readText(reviewFile);
@@ -422,7 +422,7 @@ function collectPendingReviews(plans: FileMeta[]): ExecutionReviewItem[] {
       plan,
       reviewPath,
       status: ready ? "ready" as const : "empty" as const,
-      reason: ready ? "复盘文件已有内容" : "复盘文件存在，但内容还不足以形成反馈"
+      reason: ready ? "复盘文件已有内容" : "复盘文件已经建了，但还没写清楚这周做得怎么样"
     };
   }).filter((item) => item.status !== "ready");
 }
@@ -440,36 +440,36 @@ function buildSuggestions(input: {
   if (repeated) {
     suggestions.push({
       id: "blocker-adjustment",
-      title: "把反复阻塞拆成下一阶段任务",
-      reason: `“${repeated.problem}”出现 ${repeated.count} 次，最近来源是 ${repeated.source.path}`,
-      action: `在路线调整记录中新增针对“${repeated.problem}”的拆解动作，并把下一步限定为一个可验证产出。`,
+      title: "先处理反复卡住的问题",
+      reason: `“${repeated.problem}”已经出现 ${repeated.count} 次，最近一次在 ${repeated.source.path}`,
+      action: `把“${repeated.problem}”写进路线调整记录，并给它安排一个很小的下一步。`,
       routePath
     });
   }
   if (input.unfinishedTasks.length) {
     suggestions.push({
       id: "unfinished-plan-adjustment",
-      title: "收敛本周未完成任务",
-      reason: `当前还有 ${input.unfinishedTasks.length} 个未完成计划项，最靠前的是“${input.unfinishedTasks[0].title}”`,
-      action: "把路线当前阶段的任务范围压缩到 1-2 个高优先级动作，先交付可记录证据的产出。",
+      title: "本周先挑少一点做",
+      reason: `现在还有 ${input.unfinishedTasks.length} 个计划项没完成，最靠前的是“${input.unfinishedTasks[0].title}”`,
+      action: "把当前阶段先改成 1-2 个最重要的小任务，做完后留下链接、截图或提交记录。",
       routePath
     });
   }
   if (input.pendingReviews.length) {
     suggestions.push({
       id: "review-adjustment",
-      title: "先补复盘再扩展路线",
-      reason: `${input.pendingReviews.length} 个计划缺少有效复盘，无法判断路线是否应该继续推进`,
-      action: "生成本周复盘，确认完成差异、问题根因和下周期调整后再改路线。",
+      title: "先写复盘，再改路线",
+      reason: `${input.pendingReviews.length} 个计划还没写清楚结果，暂时看不出下一步该怎么改`,
+      action: "先生成本周复盘，写清楚哪些做完了、哪里卡住了、下周准备怎么改。",
       routePath
     });
   }
   if (!input.evidence.length) {
     suggestions.push({
       id: "evidence-adjustment",
-      title: "为当前阶段定义最小产出证据",
-      reason: "最近日志和复盘中没有可追踪产出，执行反馈不足",
-      action: "给路线当前阶段补一个可提交、可截图或可链接的最小产出物。",
+      title: "给当前阶段补一个看得见的成果",
+      reason: "最近日志和复盘里没有链接、截图、提交记录这类成果",
+      action: "给当前阶段加一个小成果要求，比如一篇笔记、一个 demo、一次 commit 或一张截图。",
       routePath
     });
   }
@@ -838,7 +838,7 @@ export function createPlanFromRoute(payload: Record<string, string>) {
   const routeMeta = fileMeta(routeFile);
   const routeProgress = routeProgressFromFile(routeFile);
   const task = routeProgress?.keyTask || routeProgress?.currentTheme || "推进当前路线阶段";
-  const output = routeProgress?.output || "可验证学习产出";
+  const output = routeProgress?.output || "能看到的学习成果";
   const text = `# 学习计划：${week}
 
 ## 基本信息
@@ -973,7 +973,7 @@ export function applyRouteAdjustment(payload: Record<string, string>) {
   const routeFile = requireSectionPath(routePath, "routes");
   const suggestion = payload.suggestion?.trim();
   if (!suggestion) throw new Error("缺少路线调整建议");
-  const reason = payload.reason?.trim() || "Dashboard 执行闭环建议";
+  const reason = payload.reason?.trim() || "Dashboard 建议";
   const backup = backupFile(routeFile);
   const text = appendRouteAdjustment(readText(routeFile), normalizeDate(payload.date), suggestion, reason);
   writeText(routeFile, text);

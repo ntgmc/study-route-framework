@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { resolveDataConfig } from "../backend/config.js";
+import { ensureRecommendedFrontMatter } from "../backend/documentModel.js";
 import { defaultContent } from "../backend/templates.js";
 import {
   appendAfterTable,
@@ -10,6 +11,7 @@ import {
   relativePath,
   writeText
 } from "../backend/markdownStore.js";
+import { doctorReport, healthReport, migrateWorkspace } from "../backend/workspace.js";
 import type { CliCommand, ParsedCli } from "../../types/cli.js";
 
 const DEFAULT_GOAL = "goals/2026-internship-ai-backend.md";
@@ -27,7 +29,7 @@ function parseArgs(argv: string[]): ParsedCli {
     const token = argv[index];
     if (!token.startsWith("--")) usage(`无法识别参数：${token}`);
     const key = token.slice(2);
-    if (key === "force") {
+    if (["force", "json", "dry-run"].includes(key)) {
       options[key] = true;
       continue;
     }
@@ -46,7 +48,7 @@ function parseArgs(argv: string[]): ParsedCli {
 
 function usage(message?: string): never {
   if (message) console.error(message);
-  console.error("用法：npm run cli -- <init-log|add-log|leetcode|exam-review|dashboard|week-plan> [options]");
+  console.error("用法：npm run cli -- <init-log|add-log|leetcode|exam-review|dashboard|week-plan|health|doctor|migrate> [options]");
   process.exit(1);
 }
 
@@ -107,7 +109,7 @@ function renderLog(date: string, status: string, hours: string, goal: string, pl
 
 function ensureLog(date: string, status: string, hours: string, goal: string, plan: string): string {
   const filePath = logPath(date);
-  if (!readable(filePath)) writeText(filePath, renderLog(date, status, hours, goal, plan));
+  if (!readable(filePath)) writeText(filePath, ensureRecommendedFrontMatter(renderLog(date, status, hours, goal, plan), relativePath(filePath), date));
   return filePath;
 }
 
@@ -122,6 +124,14 @@ function readable(filePath: string): boolean {
 
 function printRelative(filePath: string): void {
   console.log(relativePath(filePath));
+}
+
+function printReport(report: unknown, options: ParsedCli["options"], fallback: string): void {
+  if (options.json === true) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  console.log(fallback);
 }
 
 function cmdInitLog(options: ParsedCli["options"]): void {
@@ -298,8 +308,23 @@ function cmdWeekPlan(options: ParsedCli["options"]): void {
 
 - 对应复盘文件：\`reviews/${week}.md\`
 `;
-  writeText(filePath, text || defaultContent("plans", week));
+  writeText(filePath, ensureRecommendedFrontMatter(text || defaultContent("plans", week), relativePath(filePath), week));
   printRelative(filePath);
+}
+
+function cmdHealth(options: ParsedCli["options"]): void {
+  const report = healthReport();
+  printReport(report, options, `health ok=${report.ok} schema=${report.schema_version} issues=${report.issues.length}`);
+}
+
+function cmdDoctor(options: ParsedCli["options"]): void {
+  const report = doctorReport();
+  printReport(report, options, `doctor ok=${report.ok} schema=${report.schema_version} checks=${report.checks.length} issues=${report.health.issues.length}`);
+}
+
+function cmdMigrate(options: ParsedCli["options"]): void {
+  const report = migrateWorkspace({ dryRun: options["dry-run"] === true });
+  printReport(report, options, `migrate ok=${report.ok} dry_run=${report.dry_run} actions=${report.actions.length} backups=${report.backups.length}`);
 }
 
 function weekNumber(date: Date): number {
@@ -330,6 +355,15 @@ switch (parsed.command) {
     break;
   case "week-plan":
     cmdWeekPlan(parsed.options);
+    break;
+  case "health":
+    cmdHealth(parsed.options);
+    break;
+  case "doctor":
+    cmdDoctor(parsed.options);
+    break;
+  case "migrate":
+    cmdMigrate(parsed.options);
     break;
   default:
     usage(`未知命令：${parsed.command}`);

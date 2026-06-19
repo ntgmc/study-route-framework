@@ -1,10 +1,18 @@
-import type { FileDocument, FileMeta, RepoSummary, SectionKey, SortMode } from "./domain.js";
+import type { FileDocument, FileMeta, HealthReport, RepoSummary, SectionKey, SortMode } from "./domain.js";
 
-export interface ApiErrorResponse {
+export interface ApiResponseMeta {
+  api_version?: number;
+}
+
+export interface WorkspaceResponseMeta extends ApiResponseMeta {
+  workspace_schema_version?: number;
+}
+
+export interface ApiErrorResponse extends ApiResponseMeta {
   error: string;
 }
 
-export type SummaryResponse = RepoSummary;
+export type SummaryResponse = RepoSummary & ApiResponseMeta;
 
 export interface FilesRequest {
   section: SectionKey;
@@ -12,22 +20,22 @@ export interface FilesRequest {
   sort?: SortMode;
 }
 
-export interface FilesResponse {
+export interface FilesResponse extends WorkspaceResponseMeta {
   files: FileMeta[];
 }
 
-export interface SearchResponse {
+export interface SearchResponse extends WorkspaceResponseMeta {
   results: FileMeta[];
 }
 
-export type FileResponse = FileDocument;
+export type FileResponse = FileDocument & WorkspaceResponseMeta;
 
 export interface SaveFileRequest {
   path: string;
   content: string;
 }
 
-export interface SaveFileResponse {
+export interface SaveFileResponse extends WorkspaceResponseMeta {
   ok: true;
   meta: FileMeta;
   backup?: string;
@@ -39,7 +47,7 @@ export interface CreateFileRequest {
   name: string;
 }
 
-export interface CreateFileResponse {
+export interface CreateFileResponse extends WorkspaceResponseMeta {
   ok: true;
   meta: FileMeta;
 }
@@ -53,7 +61,7 @@ export interface ArchiveFileRequest {
   path: string;
 }
 
-export interface ArchiveFileResponse {
+export interface ArchiveFileResponse extends WorkspaceResponseMeta {
   ok: true;
   archived_to: string;
 }
@@ -65,7 +73,7 @@ export interface DashboardFocusRequest {
   today?: string;
 }
 
-export interface DashboardFocusResponse {
+export interface DashboardFocusResponse extends WorkspaceResponseMeta {
   ok: true;
   backup: string;
   focus: Record<string, string>;
@@ -81,7 +89,7 @@ export interface DailyLogRequest {
   next?: string;
 }
 
-export interface DailyLogResponse {
+export interface DailyLogResponse extends WorkspaceResponseMeta {
   ok: true;
   path: string;
   backup: string;
@@ -93,7 +101,7 @@ export interface CreatePlanFromRouteRequest {
   week?: string;
 }
 
-export interface CreatePlanFromRouteResponse {
+export interface CreatePlanFromRouteResponse extends WorkspaceResponseMeta {
   ok: true;
   path: string;
   existed: boolean;
@@ -105,7 +113,7 @@ export interface CreateLogFromPlanRequest {
   date?: string;
 }
 
-export interface CreateLogFromPlanResponse {
+export interface CreateLogFromPlanResponse extends WorkspaceResponseMeta {
   ok: true;
   path: string;
   existed: boolean;
@@ -118,7 +126,7 @@ export interface CreateReviewFromPlanRequest {
   week?: string;
 }
 
-export interface CreateReviewFromPlanResponse {
+export interface CreateReviewFromPlanResponse extends WorkspaceResponseMeta {
   ok: true;
   path: string;
   existed: boolean;
@@ -132,12 +140,14 @@ export interface ApplyRouteAdjustmentRequest {
   date?: string;
 }
 
-export interface ApplyRouteAdjustmentResponse {
+export interface ApplyRouteAdjustmentResponse extends WorkspaceResponseMeta {
   ok: true;
   path: string;
   backup: string;
   meta: FileMeta;
 }
+
+export interface HealthResponse extends HealthReport, WorkspaceResponseMeta {}
 
 export type AiProviderId = "deepseek" | "openai" | "openrouter" | "siliconflow" | "custom" | "ollama" | "lmstudio";
 export type AiConfigSource = "environment" | "workspace" | "default" | "disabled";
@@ -164,7 +174,7 @@ export interface AiProviderOption {
   default_model: string;
 }
 
-export interface AiSettingsResponse {
+export interface AiSettingsResponse extends ApiResponseMeta {
   settings: AiWorkspaceSettings;
   saved_settings: Partial<AiWorkspaceSettings>;
   providers: AiProviderOption[];
@@ -180,7 +190,7 @@ export interface SaveAiSettingsResponse extends AiSettingsResponse {
   ok: true;
 }
 
-export interface AiStatusResponse {
+export interface AiStatusResponse extends ApiResponseMeta {
   enabled: boolean;
   configured: boolean;
   provider: string;
@@ -212,7 +222,7 @@ export interface AiGenerateRequest {
   context: string;
 }
 
-export interface AiGenerateResponse {
+export interface AiGenerateResponse extends ApiResponseMeta {
   ok: true;
   provider: string;
   model: string;
@@ -220,7 +230,7 @@ export interface AiGenerateResponse {
   usage: unknown;
 }
 
-export interface AttachmentUploadResponse {
+export interface AttachmentUploadResponse extends WorkspaceResponseMeta {
   ok: true;
   path: string;
   markdown: string;

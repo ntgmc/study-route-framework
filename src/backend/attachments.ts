@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Request, Response } from "express";
 import type { AttachmentUploadResponse } from "../../types/api.js";
+import { API_VERSION } from "../../types/domain.js";
 import { resolveDataConfig } from "./config.js";
 
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -59,7 +60,7 @@ export function sendAttachmentPath(value: string, response: Response): void {
   const target = path.resolve(root, value);
   posixRelative(root, target);
   if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
-    response.status(404).json({ error: "附件不存在" });
+    response.status(404).json({ api_version: API_VERSION, error: "附件不存在" });
     return;
   }
   response.setHeader("X-Content-Type-Options", "nosniff");

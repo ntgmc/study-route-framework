@@ -67,6 +67,25 @@ describe("cli", () => {
     expect(content).toContain("- Tomorrow");
   });
 
+  it("reports health, doctor, and migration as json", () => {
+    const dryRun = JSON.parse(runCli(["migrate", "--dry-run", "--json"]));
+    expect(dryRun.dry_run).toBe(true);
+    expect(fs.existsSync(path.join(tempRoot, ".study-route", "workspace.json"))).toBe(false);
+
+    const migrated = JSON.parse(runCli(["migrate", "--json"]));
+    expect(migrated.dry_run).toBe(false);
+    expect(migrated.actions.some((action: { action: string }) => action.action === "create_manifest")).toBe(true);
+    expect(fs.existsSync(path.join(tempRoot, ".study-route", "workspace.json"))).toBe(true);
+
+    const health = JSON.parse(runCli(["health", "--json"]));
+    expect(health.schema_version).toBe(1);
+    expect(Array.isArray(health.issues)).toBe(true);
+
+    const doctor = JSON.parse(runCli(["doctor", "--json"]));
+    expect(doctor.schema_version).toBe(1);
+    expect(doctor.checks.map((check: { name: string }) => check.name)).toContain("health");
+  });
+
   it("updates records, dashboard, and week plans", () => {
     expect(runCli(["leetcode", "--topic", "Array", "--title", "Two Sum"])).toBe("records/leetcode.md");
     expect(runCli(["exam-review", "--subject", "Math", "--actual", "2h"])).toBe("records/exam-review.md");

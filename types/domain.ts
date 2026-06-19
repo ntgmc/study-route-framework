@@ -1,5 +1,8 @@
 export type DataMode = "demo" | "external";
 
+export const WORKSPACE_SCHEMA_VERSION = 1;
+export const API_VERSION = 1;
+
 export type SectionKey =
   | "dashboard"
   | "goals"
@@ -116,6 +119,7 @@ export interface RepoSummary {
   dataRoot: string;
   frameworkRoot: string;
   dataMode: DataMode;
+  workspace_schema_version: number;
   sections: SectionSummary[];
   stats: RepoStats;
   focus: Record<string, string>;
@@ -129,3 +133,105 @@ export interface FileDocument {
 }
 
 export type SortMode = "updated" | "name";
+
+export type DocumentType =
+  | "dashboard"
+  | "goal"
+  | "route"
+  | "plan"
+  | "log"
+  | "review"
+  | "project"
+  | "record"
+  | "resource"
+  | "exam"
+  | "template";
+
+export interface DocumentFrontMatter {
+  id?: string;
+  type?: DocumentType;
+  schema_version?: number;
+  title?: string;
+  created?: string;
+  updated?: string;
+  tags?: string[];
+  status?: string;
+  target_date?: string;
+  goal_id?: string;
+  route_id?: string;
+  week?: string;
+  plan_id?: string;
+  date?: string;
+  period?: string;
+  record_type?: string;
+  resource_type?: string;
+  url?: string;
+  subject?: string;
+  exam_date?: string;
+  [key: string]: string | number | boolean | string[] | undefined;
+}
+
+export interface WorkspaceManifest {
+  schema_version: number;
+  created_at: string;
+  updated_at: string;
+  framework_version: string;
+}
+
+export type HealthSeverity = "error" | "warning" | "info";
+
+export interface HealthIssue {
+  severity: HealthSeverity;
+  code: string;
+  message: string;
+  path?: string;
+  line?: number;
+}
+
+export interface HealthStats {
+  files: number;
+  managed_files: number;
+  attachments: number;
+  orphan_attachments: number;
+  duplicate_ids: number;
+  broken_links: number;
+}
+
+export interface HealthReport {
+  ok: boolean;
+  schema_version: number;
+  issues: HealthIssue[];
+  stats: HealthStats;
+}
+
+export interface MigrationAction {
+  path: string;
+  action: "create_manifest" | "update_manifest" | "add_front_matter" | "update_front_matter" | "skip";
+  message: string;
+}
+
+export interface MigrationReport {
+  ok: boolean;
+  dry_run: boolean;
+  from_schema_version: number;
+  to_schema_version: number;
+  actions: MigrationAction[];
+  backups: string[];
+  health: HealthReport;
+}
+
+export interface DoctorCheck {
+  name: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface DoctorReport {
+  ok: boolean;
+  dataRoot: string;
+  frameworkRoot: string;
+  dataMode: DataMode;
+  schema_version: number;
+  checks: DoctorCheck[];
+  health: HealthReport;
+}

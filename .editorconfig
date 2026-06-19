@@ -6,8 +6,9 @@ end_of_line = crlf
 insert_final_newline = true
 trim_trailing_whitespace = true
 
-[*.{md,py,ps1,html,css,js,json}]
+[*.{ts,tsx,js,jsx,json,md,css,html,py,ps1}]
 charset = utf-8
+end_of_line = crlf
 
 [*.sh]
 charset = utf-8

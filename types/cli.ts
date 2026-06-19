@@ -4,7 +4,10 @@ export type CliCommand =
   | "leetcode"
   | "exam-review"
   | "dashboard"
-  | "week-plan";
+  | "week-plan"
+  | "health"
+  | "doctor"
+  | "migrate";
 
 export interface ParsedCli {
   command: CliCommand;

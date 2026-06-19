@@ -83,19 +83,28 @@ describe("api", () => {
   it("serves summary, files, file, search, and mutations", async () => {
     const app = createApp();
     const summary = await request(app).get("/api/summary").expect(200);
+    expect(summary.body.api_version).toBe(1);
+    expect(summary.body.workspace_schema_version).toBe(0);
     expect(summary.body.dataMode).toBe("external");
     expect(summary.body.execution.todayTasks[0].title).toBe("D");
 
     const files = await request(app).get("/api/files?section=plans").expect(200);
+    expect(files.body.api_version).toBe(1);
     expect(files.body.files[0].path).toBe("plans/demo.md");
 
     const file = await request(app).get("/api/file?path=plans/demo.md").expect(200);
+    expect(file.body.api_version).toBe(1);
     expect(file.body.content).toContain("hello api");
 
     const search = await request(app).get("/api/search?q=api").expect(200);
+    expect(search.body.api_version).toBe(1);
     expect(search.body.results[0].path).toBe("plans/demo.md");
 
+    const health = await request(app).get("/api/health").expect(200);
+    expect(health.body).toMatchObject({ api_version: 1, workspace_schema_version: 0, schema_version: 0 });
+
     const saved = await request(app).post("/api/file").send({ path: "plans/demo.md", content: "# Demo\n\nsaved" }).expect(200);
+    expect(saved.body.api_version).toBe(1);
     expect(saved.body.backup).toContain(".backups/study-gui");
 
     const created = await request(app).post("/api/create").send({ section: "plans", title: "Created", name: "" }).expect(201);
@@ -152,12 +161,14 @@ describe("api", () => {
   it("reports ai status and rejects generation without key", async () => {
     const app = createApp();
     const status = await request(app).get("/api/ai/status").expect(200);
+    expect(status.body.api_version).toBe(1);
     expect(status.body.enabled).toBe(true);
     expect(status.body.configured).toBe(false);
     expect(status.body.provider).toBe("DeepSeek");
     expect(status.body.context_limits).toMatchObject({ prompt_chars: 4000, context_chars: 12000 });
     expect(status.body.sends_context_fields).toEqual(["mode", "prompt", "section", "path", "context"]);
-    await request(app).post("/api/ai/generate").send({ prompt: "test" }).expect(428);
+    const rejected = await request(app).post("/api/ai/generate").send({ prompt: "test" }).expect(428);
+    expect(rejected.body.api_version).toBe(1);
   });
 
   it("disables AI generation explicitly", async () => {

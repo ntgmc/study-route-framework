@@ -16,7 +16,16 @@ import type {
 } from "../../types/domain.js";
 import { ignoredDirs, isSectionKey, managedDirs, sectionByKey, sections } from "../shared/sections.js";
 import { resolveDataConfig } from "./config.js";
+import { ensureRecommendedFrontMatter } from "./documentModel.js";
+import {
+  cleanCell as parseCleanCell,
+  extractMarkdownTitle,
+  sectionBody as parseSectionBody,
+  tableRows as parseTableRows,
+  taskItems as parseTaskItems
+} from "./markdownParser.js";
 import { defaultContent } from "./templates.js";
+import { currentWorkspaceSchemaVersion } from "./workspace.js";
 
 function config() {
   return resolveDataConfig();
@@ -179,7 +188,7 @@ function weekId(date = new Date()): string {
 }
 
 function cleanCell(value: string): string {
-  return value.trim().replace(/^`|`$/g, "").trim();
+  return parseCleanCell(value);
 }
 
 function meaningful(value: string): boolean {
@@ -200,54 +209,15 @@ function filePathsForSection(section: SectionKey): string[] {
 }
 
 function sectionBody(text: string, heading: string): { body: string; startLine: number } | null {
-  const lines = text.split(/\r?\n/);
-  const headingIndex = lines.findIndex((line) => line.trim() === `## ${heading}`);
-  if (headingIndex < 0) return null;
-  const endIndex = lines.findIndex((line, index) => index > headingIndex && /^##\s+/.test(line.trim()));
-  return {
-    body: lines.slice(headingIndex + 1, endIndex < 0 ? lines.length : endIndex).join("\n"),
-    startLine: headingIndex + 2
-  };
-}
-
-function splitTableRow(line: string): string[] {
-  return line
-    .trim()
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map(cleanCell);
+  return parseSectionBody(text, heading);
 }
 
 function tableRows(text: string, heading: string): Array<{ cells: string[]; line: number }> {
-  const section = sectionBody(text, heading);
-  if (!section) return [];
-  const lines = section.body.split(/\r?\n/);
-  const rows: Array<{ cells: string[]; line: number }> = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index].trim();
-    if (!line.startsWith("|") || /^\|\s*-+/.test(line)) continue;
-    const next = lines[index + 1]?.trim() ?? "";
-    if (/^\|\s*:?-+/.test(next)) continue;
-    const cells = splitTableRow(line);
-    if (cells.some(meaningful)) rows.push({ cells, line: section.startLine + index });
-  }
-  return rows;
+  return parseTableRows(text, heading).filter((row) => row.cells.some(meaningful));
 }
 
 function bulletItems(text: string, heading: string): Array<{ text: string; checked: boolean; line: number }> {
-  const section = sectionBody(text, heading);
-  if (!section) return [];
-  return section.body
-    .split(/\r?\n/)
-    .map((line, index) => {
-      const match = line.match(/^\s*-\s*(\[[ xX]\]\s*)?(.*)$/);
-      if (!match) return null;
-      const textValue = cleanCell(match[2] ?? "");
-      if (!meaningful(textValue)) return null;
-      return { text: textValue, checked: /\[[xX]\]/.test(match[1] ?? ""), line: section.startLine + index };
-    })
-    .filter((item): item is { text: string; checked: boolean; line: number } => Boolean(item));
+  return parseTaskItems(text, heading).filter((item) => meaningful(item.text));
 }
 
 function managedPathInText(text: string, section: string): string | undefined {
@@ -517,11 +487,7 @@ export function executionSummary(): ExecutionSummary {
 }
 
 export function extractTitle(text: string, fallback: string): string {
-  for (const line of text.split(/\r?\n/)) {
-    const clean = line.trim();
-    if (clean.startsWith("#")) return clean.replace(/^#+/, "").trim() || fallback;
-  }
-  return fallback;
+  return extractMarkdownTitle(text, fallback);
 }
 
 export function extractExcerpt(text: string): string {
@@ -620,7 +586,9 @@ export function createFile(section: string, title: string, name: string) {
   const filePath = path.resolve(dataSectionRoot(section), filename);
   if (!isManagedPath(filePath)) throw new Error("文件路径无效");
   if (fs.existsSync(filePath)) throw new Error("文件已存在");
-  writeText(filePath, defaultContent(section, title || path.basename(filePath, ".md")));
+  const rel = relativePath(filePath);
+  const content = defaultContent(section, title || path.basename(filePath, ".md"));
+  writeText(filePath, ensureRecommendedFrontMatter(content, rel, title || path.basename(filePath, ".md")));
   return { ok: true as const, meta: fileMeta(filePath) };
 }
 
@@ -694,6 +662,7 @@ export function repoSummary(): RepoSummary {
     dataRoot: data.dataRoot,
     frameworkRoot: data.frameworkRoot,
     dataMode: data.dataMode,
+    workspace_schema_version: currentWorkspaceSchemaVersion(),
     sections: sectionSummaries,
     stats: {
       files: totalFiles,
@@ -779,7 +748,7 @@ export function appendBullet(text: string, heading: string, value: string): stri
 
 export function ensureLog(date: string): string {
   const filePath = path.join(config().dataRoot, "logs", `${date}.md`);
-  if (!fs.existsSync(filePath)) writeText(filePath, defaultContent("logs", date));
+  if (!fs.existsSync(filePath)) writeText(filePath, ensureRecommendedFrontMatter(defaultContent("logs", date), relativePath(filePath), date));
   return filePath;
 }
 
@@ -874,7 +843,7 @@ export function createPlanFromRoute(payload: Record<string, string>) {
 
 - 对应复盘文件：\`reviews/${week}.md\`
 `;
-  writeText(target, text);
+  writeText(target, ensureRecommendedFrontMatter(text, relativePath(target), week));
   return { ok: true as const, path: relativePath(target), existed: false, meta: fileMeta(target) };
 }
 
@@ -893,7 +862,7 @@ export function createLogFromPlan(payload: Record<string, string>) {
   text = ensureHeading(text, "遇到的问题", "| 问题 | 当前判断 | 下一步 |\n| --- | --- | --- |\n");
   text = ensureHeading(text, "明日计划");
   text = ensureHeading(text, "备注");
-  writeText(target, text);
+  writeText(target, ensureRecommendedFrontMatter(text, relativePath(target), date));
   return {
     ok: true as const,
     path: relativePath(target),
@@ -953,7 +922,7 @@ ${completionText || "- "}
 | 调整项 | 操作 | 预期效果 |
 | --- | --- | --- |
 `;
-  writeText(target, text);
+  writeText(target, ensureRecommendedFrontMatter(text, relativePath(target), week));
   return { ok: true as const, path: relativePath(target), existed: false, meta: fileMeta(target) };
 }
 

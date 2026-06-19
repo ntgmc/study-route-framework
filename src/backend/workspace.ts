@@ -17,6 +17,7 @@ import { parseFrontMatter, parseMarkdownDocument } from "./markdownParser.js";
 
 const WORKSPACE_DIR = ".study-route";
 const MANIFEST_FILE = "workspace.json";
+const WORKSPACE_SUBDIRS = ["history", "indexes", "migrations"];
 
 interface ManifestReadResult {
   schemaVersion: number;
@@ -95,6 +96,9 @@ export function currentWorkspaceSchemaVersion(): number {
 function writeManifest(manifest: WorkspaceManifest): void {
   const filePath = manifestPath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  for (const folder of WORKSPACE_SUBDIRS) {
+    fs.mkdirSync(path.join(config().dataRoot, WORKSPACE_DIR, folder), { recursive: true });
+  }
   fs.writeFileSync(filePath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 }
 

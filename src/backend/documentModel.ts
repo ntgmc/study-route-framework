@@ -67,7 +67,9 @@ export function recommendedFrontMatter(relPath: string, title: string, existing:
     title,
     created: date,
     updated: date,
-    tags: []
+    tags: [],
+    favorite: false,
+    pinned: false
   };
 
   if (type === "goal") base.status = "active";

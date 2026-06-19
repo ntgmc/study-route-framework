@@ -56,7 +56,11 @@ describe("workspace health and migration", () => {
     const first = migrateWorkspace();
     expect(first.dry_run).toBe(false);
     expect(fs.existsSync(path.join(tempRoot, ".study-route", "workspace.json"))).toBe(true);
-    expect(fs.readFileSync(path.join(tempRoot, "plans", "demo.md"), "utf8")).toContain("schema_version: 1");
+    expect(fs.existsSync(path.join(tempRoot, ".study-route", "history"))).toBe(true);
+    expect(fs.existsSync(path.join(tempRoot, ".study-route", "indexes"))).toBe(true);
+    expect(fs.existsSync(path.join(tempRoot, ".study-route", "migrations"))).toBe(true);
+    expect(fs.readFileSync(path.join(tempRoot, "plans", "demo.md"), "utf8")).toContain("schema_version: 2");
+    expect(fs.readFileSync(path.join(tempRoot, "plans", "demo.md"), "utf8")).toContain("favorite: false");
     expect(first.backups.some((item) => item.includes("plans/demo.md"))).toBe(true);
 
     const second = migrateWorkspace();

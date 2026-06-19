@@ -43,6 +43,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import type { EditorView, ViewUpdate } from "@codemirror/view";
+import type { GitStatusResponse } from "../../../types/api";
 import type { ExecutionAdjustmentSuggestion, FileMeta, RepoSummary, SectionKey } from "../../../types/domain";
 import { client } from "./api";
 import {
@@ -50,10 +51,8 @@ import {
   getAllFileMeta,
   getDraft,
   getDraftVersions,
-  getFileMeta,
   getUiState,
   saveDraft,
-  saveFileMeta,
   saveUiState,
   type DraftVersionRecord,
   type FileMetaRecord
@@ -79,12 +78,6 @@ interface ToastAction {
   label: string;
   variant?: "primary" | "danger" | "plain";
   onClick: () => void;
-}
-
-interface MetadataExportPayload {
-  version: 1;
-  exportedAt: string;
-  records: FileMetaRecord[];
 }
 
 const LazyAiDialog = lazy(() => import("./AiDialog"));
@@ -385,8 +378,10 @@ export function App() {
   const [editorMode, setEditorMode] = useState<EditorMode>("edit");
   const [draftVersions, setDraftVersions] = useState<DraftVersionRecord[]>([]);
   const [compareVersion, setCompareVersion] = useState<DraftVersionRecord | null>(null);
-  const [fileMetaRecords, setFileMetaRecords] = useState<Record<string, FileMetaRecord>>({});
-  const [currentMetaRecord, setCurrentMetaRecord] = useState<FileMetaRecord | null>(null);
+  const [legacyMetaRecords, setLegacyMetaRecords] = useState<Record<string, FileMetaRecord>>({});
+  const [currentMetaRecord, setCurrentMetaRecord] = useState<FileMeta | null>(null);
+  const [gitStatus, setGitStatus] = useState<GitStatusResponse | null>(null);
+  const [gitBusy, setGitBusy] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("saved");
@@ -402,7 +397,6 @@ export function App() {
   const scrollSyncResetFrameRef = useRef<number | null>(null);
   const showPreviewTopRef = useRef(false);
   const toastIdRef = useRef(1);
-  const metadataInputRef = useRef<HTMLInputElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const [showPreviewTop, setShowPreviewTop] = useState(false);
 
@@ -628,13 +622,18 @@ export function App() {
 
   const loadFileMetaRecords = useCallback(async () => {
     const records = await getAllFileMeta().catch(() => []);
-    setFileMetaRecords(Object.fromEntries(records.map((record) => [record.path, record])));
+    setLegacyMetaRecords(Object.fromEntries(records.map((record) => [record.path, record])));
   }, []);
 
   const refreshSummary = useCallback(async () => {
     const next = await client.summary();
     setState({ summary: next });
   }, [setState]);
+
+  const refreshGitStatus = useCallback(async () => {
+    const next = await client.gitStatus();
+    setGitStatus(next);
+  }, []);
 
   const loadFiles = useCallback(
     async (targetSection = section, targetQuery = query, targetSort = sort) => {
@@ -644,6 +643,13 @@ export function App() {
       }
       const result = await client.files(targetSection, targetQuery, targetSort);
       setState({ files: result.files });
+      const activePath = useAppStore.getState().current?.path;
+      const active = activePath ? result.files.find((file) => file.path === activePath) : undefined;
+      if (active) {
+        setState({ current: active });
+        setCurrentMetaRecord(active);
+        setTagInput(active.tags.join(", "));
+      }
     },
     [query, section, setState, sort]
   );
@@ -682,9 +688,8 @@ export function App() {
       setSaveState(nextDirty ? "dirty" : "saved");
       setCompareVersion(null);
       await loadDraftVersions(result.meta.path);
-      const meta = await getFileMeta(result.meta.path);
-      setCurrentMetaRecord(meta);
-      setTagInput(meta.tags.join(", "));
+      setCurrentMetaRecord(result.meta);
+      setTagInput(result.meta.tags.join(", "));
       await saveUiState(result.meta.section, result.meta.path).catch(() => undefined);
       setStatus(discardedDraft ? `已丢弃 ${result.meta.path} 的本地草稿并打开文件` : `已打开 ${result.meta.path}`);
     },
@@ -742,6 +747,7 @@ export function App() {
   const init = useCallback(async () => {
     await loadFileMetaRecords();
     await refreshSummary();
+    await refreshGitStatus().catch(() => undefined);
     const saved = await getUiState().catch(() => undefined);
     if (saved?.section && saved.section !== "dashboard") {
       await selectSection(saved.section as SectionKey);
@@ -749,7 +755,7 @@ export function App() {
     } else {
       await selectSection("dashboard");
     }
-  }, [loadFileMetaRecords, openFile, refreshSummary, selectSection]);
+  }, [loadFileMetaRecords, openFile, refreshGitStatus, refreshSummary, selectSection]);
 
   useEffect(() => {
     init().catch((error: Error) => setStatus(error.message, true));
@@ -852,11 +858,14 @@ export function App() {
               current: result.meta,
               dirty: latest.content === savedContent ? false : latest.dirty
             });
+            setCurrentMetaRecord(result.meta);
+            setTagInput(result.meta.tags.join(", "));
             setSaveState(latest.content === savedContent ? "saved" : "dirty");
             await loadDraftVersions(path);
           }
           await refreshSummary();
           await loadFiles();
+          await refreshGitStatus().catch(() => undefined);
           reportStatus(`已自动保存 ${result.meta.path}`, false);
         })
         .catch((error: Error) => {
@@ -868,17 +877,18 @@ export function App() {
         });
     }, 30000);
     return () => window.clearInterval(timer);
-  }, [loadDraftVersions, loadFiles, refreshSummary, reportStatus, setState, setStatus]);
+  }, [loadDraftVersions, loadFiles, refreshGitStatus, refreshSummary, reportStatus, setState, setStatus]);
 
-  async function updateCurrentMeta(patch: Partial<Omit<FileMetaRecord, "path" | "updatedAt">>) {
+  async function updateCurrentMeta(patch: Partial<Pick<FileMeta, "tags" | "status" | "favorite" | "pinned">>) {
     if (!current) return;
-    const base = currentMetaRecord ?? (await getFileMeta(current.path));
-    const next = { ...base, ...patch, path: current.path, updatedAt: Date.now() };
-    await saveFileMeta(next);
-    setCurrentMetaRecord(next);
-    if (patch.tags) setTagInput(next.tags.join(", "));
-    setFileMetaRecords((records) => ({ ...records, [next.path]: next }));
-    setStatus(`已更新 ${current.path} 的本地标记`);
+    const result = await client.updateFileMeta({ path: current.path, ...patch });
+    setCurrentMetaRecord(result.meta);
+    setState({ current: result.meta });
+    if (patch.tags) setTagInput(result.meta.tags.join(", "));
+    await refreshSummary();
+    await loadFiles();
+    await refreshGitStatus().catch(() => undefined);
+    setStatus(`已更新 ${current.path} 的版本化标记`);
   }
 
   function runEditorCommand(command: (view: EditorView) => boolean) {
@@ -907,32 +917,52 @@ export function App() {
     showToast("草稿已导出为 Markdown 文件", "success");
   }
 
-  function exportMetadata() {
-    const records = Object.values(fileMetaRecords).sort((left, right) => left.path.localeCompare(right.path));
-    const payload: MetadataExportPayload = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      records
-    };
-    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
-    exportJson(`study-route-metadata-${stamp}.json`, payload);
-    showToast(`已导出 ${records.length} 条本地标记`, "success");
+  async function migrateLegacyMetadata() {
+    const records = Object.values(legacyMetaRecords).filter((record) => record.favorite || record.pinned || record.tags.length);
+    if (!records.length) {
+      reportStatus("没有可迁移的本地标记", false);
+      return;
+    }
+    const confirmed = await requestConfirmation(`把 ${records.length} 条浏览器本地标记写入 Markdown front matter？`, {
+      confirmLabel: "迁移",
+      cancelLabel: "取消"
+    });
+    if (!confirmed) return;
+    let migrated = 0;
+    for (const record of records) {
+      try {
+        await client.updateFileMeta({
+          path: record.path,
+          tags: record.tags,
+          favorite: record.favorite,
+          pinned: record.pinned
+        });
+        migrated += 1;
+      } catch {
+        // Ignore stale local records for files that no longer exist.
+      }
+    }
+    await refreshSummary();
+    await loadFiles();
+    await refreshGitStatus().catch(() => undefined);
+    if (current) {
+      const refreshed = await client.file(current.path);
+      setState({ current: refreshed.meta });
+      setCurrentMetaRecord(refreshed.meta);
+      setTagInput(refreshed.meta.tags.join(", "));
+    }
+    reportStatus(`已迁移 ${migrated} 条本地标记到 Markdown front matter`, false);
   }
 
-  async function importMetadata(file: File) {
-    const text = await file.text();
-    const parsed = JSON.parse(text) as unknown;
-    const records = readMetadataRecords(parsed);
-    await Promise.all(records.map((record) => saveFileMeta(record)));
-    const refreshed = await getAllFileMeta();
-    const mapped = Object.fromEntries(refreshed.map((record) => [record.path, record]));
-    setFileMetaRecords(mapped);
-    if (current) {
-      const next = mapped[current.path] ?? (await getFileMeta(current.path));
-      setCurrentMetaRecord(next);
-      setTagInput(next.tags.join(", "));
+  async function commitSnapshot() {
+    setGitBusy(true);
+    try {
+      const result = await client.gitCommit({});
+      setGitStatus(result.status);
+      reportStatus(result.committed ? `已提交学习快照 ${result.hash ?? ""}`.trim() : result.message, false);
+    } finally {
+      setGitBusy(false);
     }
-    reportStatus(`已导入 ${records.length} 条本地标记`, false);
   }
 
   async function uploadAttachment(file: File) {
@@ -949,11 +979,15 @@ export function App() {
       const result = await client.saveFile({ path: current.path, content });
       await clearDraft(current.path).catch(() => undefined);
       setState({ current: result.meta, dirty: false });
+      setCurrentMetaRecord(result.meta);
+      setTagInput(result.meta.tags.join(", "));
       setSaveState("saved");
       await loadDraftVersions(result.meta.path);
       await refreshSummary();
       await loadFiles();
-      reportStatus(`已保存 ${result.meta.path}${result.backup ? `，备份：${result.backup}` : ""}`, false);
+      await refreshGitStatus().catch(() => undefined);
+      const diffText = result.diff.changed ? `，diff：+${result.diff.added} -${result.diff.removed}` : "，无内容差异";
+      reportStatus(`已保存 ${result.meta.path}${result.backup ? `，备份：${result.backup}` : ""}${diffText}`, false);
     } catch (error) {
       setSaveState("dirty");
       throw error;
@@ -995,19 +1029,17 @@ export function App() {
     return [...new Set([...localTags, ...currentInlineTags])];
   }, [currentInlineTags, currentMetaRecord]);
   const allTags = useMemo(
-    () => [...new Set(Object.values(fileMetaRecords).flatMap((record) => record.tags))].sort((left, right) => left.localeCompare(right)),
-    [fileMetaRecords]
+    () => [...new Set(files.flatMap((file) => file.tags))].sort((left, right) => left.localeCompare(right)),
+    [files]
   );
   const visibleFiles = useMemo(() => {
-    const filtered = tagFilter ? files.filter((file) => fileMetaRecords[file.path]?.tags.includes(tagFilter)) : files;
+    const filtered = tagFilter ? files.filter((file) => file.tags.includes(tagFilter)) : files;
     return [...filtered].sort((left, right) => {
-      const leftMeta = fileMetaRecords[left.path];
-      const rightMeta = fileMetaRecords[right.path];
-      if (Boolean(leftMeta?.pinned) !== Boolean(rightMeta?.pinned)) return leftMeta?.pinned ? -1 : 1;
-      if (Boolean(leftMeta?.favorite) !== Boolean(rightMeta?.favorite)) return leftMeta?.favorite ? -1 : 1;
+      if (Boolean(left.pinned) !== Boolean(right.pinned)) return left.pinned ? -1 : 1;
+      if (Boolean(left.favorite) !== Boolean(right.favorite)) return left.favorite ? -1 : 1;
       return 0;
     });
-  }, [fileMetaRecords, files, tagFilter]);
+  }, [files, tagFilter]);
 
   return (
     <div className="grid h-screen grid-cols-[252px_minmax(0,1fr)] overflow-hidden bg-app text-ink max-[920px]:grid-cols-1 max-[920px]:grid-rows-[auto_minmax(0,1fr)]">
@@ -1058,6 +1090,34 @@ export function App() {
               </div>
               {isDemoData ? <div className="rounded-md bg-amber-400/10 p-2 text-amber-100">当前使用 Demo 数据，仅适合示例体验；长期使用请设置 STUDY_ROUTE_DATA_DIR。</div> : null}
             </div>
+          </section>
+        ) : null}
+        {gitStatus ? (
+          <section className="mt-3 grid gap-2 rounded-md border border-white/10 bg-white/5 p-3 text-xs">
+            <div className="flex items-center justify-between gap-2 font-medium text-slate-100">
+              <span className="flex items-center gap-2">
+                <GitCompare className="h-4 w-4" />
+                Git
+              </span>
+              <button type="button" className="rounded-md bg-white/10 px-2 py-1 text-[11px] hover:bg-white/15" onClick={() => refreshGitStatus().catch((error: Error) => setStatus(error.message, true))}>
+                刷新
+              </button>
+            </div>
+            <div className="grid gap-1 text-slate-300">
+              <div className={gitStatus.isRepo ? gitStatus.clean ? "text-emerald-200" : gitStatus.conflicts.length ? "text-red-200" : "text-amber-200" : "text-slate-300"}>
+                {!gitStatus.isRepo ? "不是 Git 仓库" : gitStatus.clean ? "工作区干净" : gitStatus.conflicts.length ? `${gitStatus.conflicts.length} 个冲突` : `${gitStatus.files.length} 个改动`}
+              </div>
+              {gitStatus.branch ? <div className="font-mono text-[11px] text-slate-400">{gitStatus.branch}</div> : null}
+              {gitStatus.message ? <div className="text-slate-400 [overflow-wrap:anywhere]">{gitStatus.message}</div> : null}
+            </div>
+            <Button
+              type="button"
+              disabled={gitBusy || !gitStatus.isRepo || gitStatus.clean || gitStatus.conflicts.length > 0}
+              onClick={() => commitSnapshot().catch((error: Error) => setStatus(error.message, true))}
+            >
+              <Save className="h-4 w-4" />
+              {gitBusy ? "提交中" : "提交学习快照"}
+            </Button>
           </section>
         ) : null}
       </aside>
@@ -1147,29 +1207,15 @@ export function App() {
                       #{tag}
                     </button>
                   ))}
-                  {!allTags.length ? <span className="text-xs text-muted">暂无本地标签</span> : null}
+                  {!allTags.length ? <span className="text-xs text-muted">暂无版本化标签</span> : null}
                 </div>
                 <div className="flex items-center justify-end gap-2 border-t border-line pt-2">
-                  <IconButton type="button" disabled={!Object.keys(fileMetaRecords).length} title="导出标签/收藏/置顶" onClick={exportMetadata}>
-                    <Download className="h-4 w-4" />
-                  </IconButton>
-                  <IconButton type="button" title="导入标签/收藏/置顶" onClick={() => metadataInputRef.current?.click()}>
+                  <IconButton type="button" disabled={!Object.keys(legacyMetaRecords).length} title="迁移浏览器本地标记到 Markdown" onClick={() => migrateLegacyMetadata().catch((error: Error) => setStatus(error.message, true))}>
                     <Upload className="h-4 w-4" />
                   </IconButton>
-                  <input
-                    ref={metadataInputRef}
-                    className="hidden"
-                    type="file"
-                    accept=".json,application/json"
-                    onChange={(event) => {
-                      const file = event.currentTarget.files?.[0];
-                      event.currentTarget.value = "";
-                      if (file) importMetadata(file).catch((error: Error) => setStatus(error.message, true));
-                    }}
-                  />
                 </div>
               </div>
-              <FileTree files={visibleFiles} current={current} metaRecords={fileMetaRecords} onOpen={openFile} />
+              <FileTree files={visibleFiles} current={current} onOpen={openFile} />
             </aside>
             <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-white">
               <div className="grid gap-2 border-b border-line px-4 py-2">
@@ -1827,12 +1873,10 @@ function Input({ label, value, onChange, type = "text" }: { label: string; value
 function FileTree({
   files,
   current,
-  metaRecords,
   onOpen
 }: {
   files: FileMeta[];
   current: FileMeta | null;
-  metaRecords: Record<string, FileMetaRecord>;
   onOpen: (path: string) => Promise<void>;
 }) {
   const setStatus = useAppStore((state) => state.setStatus);
@@ -1853,7 +1897,6 @@ function FileTree({
           </div>
           <div className="grid gap-1">
             {items.map((file) => {
-              const meta = metaRecords[file.path];
               return (
                 <button
                   key={file.path}
@@ -1869,14 +1912,14 @@ function FileTree({
                       <div className="text-xs text-muted [overflow-wrap:anywhere]">{file.name} · {file.updated} · {file.size} B</div>
                     </div>
                     <div className="flex shrink-0 gap-1 text-muted">
-                      {meta?.pinned ? <Pin className="h-3.5 w-3.5 fill-current" /> : null}
-                      {meta?.favorite ? <Star className="h-3.5 w-3.5 fill-current" /> : null}
+                      {file.pinned ? <Pin className="h-3.5 w-3.5 fill-current" /> : null}
+                      {file.favorite ? <Star className="h-3.5 w-3.5 fill-current" /> : null}
                     </div>
                   </div>
                   <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">{file.excerpt}</div>
-                  {meta?.tags.length ? (
+                  {file.tags.length ? (
                     <div className="mt-2 flex flex-wrap gap-1">
-                      {meta.tags.map((tag) => (
+                      {file.tags.map((tag) => (
                         <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
                           #{tag}
                         </span>

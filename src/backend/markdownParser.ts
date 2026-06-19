@@ -128,6 +128,8 @@ export function serializeFrontMatter(data: DocumentFrontMatter): string {
     "updated",
     "tags",
     "status",
+    "favorite",
+    "pinned",
     "target_date",
     "goal_id",
     "route_id",

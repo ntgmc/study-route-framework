@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/backend/app.js";
@@ -91,6 +92,7 @@ describe("api", () => {
     const files = await request(app).get("/api/files?section=plans").expect(200);
     expect(files.body.api_version).toBe(1);
     expect(files.body.files[0].path).toBe("plans/demo.md");
+    expect(files.body.files[0].tags).toEqual([]);
 
     const file = await request(app).get("/api/file?path=plans/demo.md").expect(200);
     expect(file.body.api_version).toBe(1);
@@ -106,6 +108,18 @@ describe("api", () => {
     const saved = await request(app).post("/api/file").send({ path: "plans/demo.md", content: "# Demo\n\nsaved" }).expect(200);
     expect(saved.body.api_version).toBe(1);
     expect(saved.body.backup).toContain(".backups/study-gui");
+    expect(saved.body.diff.changed).toBeGreaterThan(0);
+    expect(saved.body.meta.id).toBe("plan:demo");
+
+    const meta = await request(app)
+      .patch("/api/file/meta")
+      .send({ path: "plans/demo.md", tags: ["api", "review"], favorite: true, pinned: true, status: "active" })
+      .expect(200);
+    expect(meta.body.meta).toMatchObject({ tags: ["api", "review"], favorite: true, pinned: true, status: "active" });
+    expect(fs.readFileSync(path.join(tempRoot, "plans", "demo.md"), "utf8")).toContain("favorite: true");
+
+    const gitStatus = await request(app).get("/api/git/status").expect(200);
+    expect(gitStatus.body).toMatchObject({ isRepo: false, clean: true });
 
     const created = await request(app).post("/api/create").send({ section: "plans", title: "Created", name: "" }).expect(201);
     expect(created.body.meta.path).toBe("plans/Created.md");
@@ -115,6 +129,26 @@ describe("api", () => {
 
     const archived = await request(app).post("/api/archive").send({ path: "plans/renamed.md" }).expect(200);
     expect(archived.body.archived_to).toContain(".trash/study-gui");
+  });
+
+  it("reports and commits Git workspace snapshots", async () => {
+    execFileSync("git", ["init"], { cwd: tempRoot, encoding: "utf8" });
+    execFileSync("git", ["config", "user.email", "study-route@example.test"], { cwd: tempRoot, encoding: "utf8" });
+    execFileSync("git", ["config", "user.name", "Study Route"], { cwd: tempRoot, encoding: "utf8" });
+
+    const app = createApp();
+    const dirty = await request(app).get("/api/git/status").expect(200);
+    expect(dirty.body.isRepo).toBe(true);
+    expect(dirty.body.clean).toBe(false);
+    expect(dirty.body.files.length).toBeGreaterThan(0);
+
+    const committed = await request(app).post("/api/git/commit").send({ message: "test snapshot" }).expect(200);
+    expect(committed.body).toMatchObject({ ok: true, committed: true, message: "test snapshot" });
+    expect(committed.body.hash).toMatch(/[0-9a-f]+/);
+    expect(committed.body.status.clean).toBe(true);
+
+    const cleanCommit = await request(app).post("/api/git/commit").send({}).expect(200);
+    expect(cleanCommit.body).toMatchObject({ ok: true, committed: false });
   });
 
   it("serves execution generation and route adjustment APIs", async () => {

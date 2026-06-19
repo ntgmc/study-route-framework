@@ -35,10 +35,32 @@ export interface SaveFileRequest {
   content: string;
 }
 
+export interface SaveDiffSummary {
+  added: number;
+  removed: number;
+  changed: number;
+  preview: string;
+}
+
 export interface SaveFileResponse extends WorkspaceResponseMeta {
   ok: true;
   meta: FileMeta;
   backup?: string;
+  diff: SaveDiffSummary;
+}
+
+export interface UpdateFileMetaRequest {
+  path: string;
+  tags?: string[];
+  status?: string;
+  favorite?: boolean;
+  pinned?: boolean;
+}
+
+export interface UpdateFileMetaResponse extends WorkspaceResponseMeta {
+  ok: true;
+  meta: FileMeta;
+  backup: string;
 }
 
 export interface CreateFileRequest {
@@ -236,4 +258,31 @@ export interface AttachmentUploadResponse extends WorkspaceResponseMeta {
   markdown: string;
   size: number;
   mime_type: string;
+}
+
+export interface GitChangedFile {
+  path: string;
+  index: string;
+  workingTree: string;
+}
+
+export interface GitStatusResponse extends WorkspaceResponseMeta {
+  isRepo: boolean;
+  clean: boolean;
+  branch?: string;
+  files: GitChangedFile[];
+  conflicts: GitChangedFile[];
+  message?: string;
+}
+
+export interface GitCommitRequest {
+  message?: string;
+}
+
+export interface GitCommitResponse extends WorkspaceResponseMeta {
+  ok: true;
+  committed: boolean;
+  message: string;
+  hash?: string;
+  status: GitStatusResponse;
 }

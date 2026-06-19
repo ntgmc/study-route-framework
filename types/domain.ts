@@ -1,6 +1,6 @@
 export type DataMode = "demo" | "external";
 
-export const WORKSPACE_SCHEMA_VERSION = 1;
+export const WORKSPACE_SCHEMA_VERSION = 2;
 export const API_VERSION = 1;
 
 export type SectionKey =
@@ -28,6 +28,7 @@ export interface SectionSummary extends SectionConfig {
 }
 
 export interface FileMeta {
+  id?: string;
   path: string;
   name: string;
   title: string;
@@ -35,6 +36,10 @@ export interface FileMeta {
   updated: string;
   size: number;
   excerpt: string;
+  tags: string[];
+  status?: string;
+  favorite?: boolean;
+  pinned?: boolean;
   line?: number;
   snippet?: string;
 }
@@ -156,6 +161,8 @@ export interface DocumentFrontMatter {
   updated?: string;
   tags?: string[];
   status?: string;
+  favorite?: boolean;
+  pinned?: boolean;
   target_date?: string;
   goal_id?: string;
   route_id?: string;

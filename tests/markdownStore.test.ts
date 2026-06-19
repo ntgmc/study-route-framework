@@ -19,6 +19,7 @@ import {
   saveFile,
   searchFiles,
   slugifyFilename,
+  updateFileFrontMatter,
   updateDashboardFocus
 } from "../src/backend/markdownStore.js";
 
@@ -150,13 +151,37 @@ describe("markdown store", () => {
 
     const saved = saveFile("plans/demo.md", "# Demo Plan\n\nUpdated keyword");
     expect(saved.backup).toContain(".backups/study-gui");
+    expect(saved.diff.changed).toBeGreaterThan(0);
     expect(getFile("plans/demo.md").content).toContain("Updated");
+    const meta = getFile("plans/demo.md").meta;
+    expect(meta).toMatchObject({
+      path: "plans/demo.md",
+      id: "plan:demo",
+      tags: [],
+      favorite: false,
+      pinned: false
+    });
 
     const created = createFile("plans", "New Plan", "");
     expect(created.meta.path).toBe("plans/New-Plan.md");
+    const createdId = created.meta.id;
 
     const renamed = renameFile(created.meta.path, "renamed.md");
     expect(renamed.meta.path).toBe("plans/renamed.md");
+    expect(renamed.meta.id).toBe(createdId);
+
+    const updatedMeta = updateFileFrontMatter("plans/demo.md", {
+      tags: ["ts", "api"],
+      favorite: true,
+      pinned: true,
+      status: "active"
+    });
+    expect(updatedMeta.backup).toContain(".backups/study-gui");
+    expect(updatedMeta.meta).toMatchObject({ tags: ["ts", "api"], favorite: true, pinned: true, status: "active" });
+    const updatedText = fs.readFileSync(path.join(tempRoot, "plans", "demo.md"), "utf8");
+    expect(updatedText).toContain("tags: [ts, api]");
+    expect(updatedText).toContain("favorite: true");
+    expect(updatedText).toContain("Updated keyword");
 
     expect(searchFiles("Updated")[0].path).toBe("plans/demo.md");
 
@@ -170,7 +195,8 @@ describe("markdown store", () => {
     expect(getFile("templates/goal.md").content).toContain("# 目标名称");
 
     saveFile("templates/goal.md", "# Custom Goal\n");
-    expect(fs.readFileSync(path.join(tempRoot, "templates", "goal.md"), "utf8")).toBe("# Custom Goal\n");
+    expect(fs.readFileSync(path.join(tempRoot, "templates", "goal.md"), "utf8")).toContain("type: template");
+    expect(fs.readFileSync(path.join(tempRoot, "templates", "goal.md"), "utf8")).toContain("# Custom Goal");
     expect(getFile("templates/goal.md").content).toContain("Custom Goal");
 
     const afterOverride = listMarkdownFiles("templates", "", "name").filter((item) => item.path === "templates/goal.md");

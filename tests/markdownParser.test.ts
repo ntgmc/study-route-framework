@@ -17,10 +17,14 @@ describe("markdown parser", () => {
       type: "plan",
       schema_version: 1,
       title: "Demo",
-      tags: []
+      tags: [],
+      favorite: true,
+      pinned: false
     });
     expect(next).toContain("id: plan:demo");
     expect(next).toContain("tags: []");
+    expect(next).toContain("favorite: true");
+    expect(next).toContain("pinned: false");
     expect(next).toContain("# Demo");
   });
 

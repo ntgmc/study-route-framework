@@ -78,11 +78,11 @@ describe("cli", () => {
     expect(fs.existsSync(path.join(tempRoot, ".study-route", "workspace.json"))).toBe(true);
 
     const health = JSON.parse(runCli(["health", "--json"]));
-    expect(health.schema_version).toBe(1);
+    expect(health.schema_version).toBe(2);
     expect(Array.isArray(health.issues)).toBe(true);
 
     const doctor = JSON.parse(runCli(["doctor", "--json"]));
-    expect(doctor.schema_version).toBe(1);
+    expect(doctor.schema_version).toBe(2);
     expect(doctor.checks.map((check: { name: string }) => check.name)).toContain("health");
   });
 

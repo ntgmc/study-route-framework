@@ -22,13 +22,18 @@ import type {
   DashboardFocusResponse,
   FileResponse,
   FilesResponse,
+  GitCommitRequest,
+  GitCommitResponse,
+  GitStatusResponse,
   RenameFileRequest,
   SaveAiSettingsRequest,
   SaveAiSettingsResponse,
   SaveFileRequest,
   SaveFileResponse,
   SearchResponse,
-  SummaryResponse
+  SummaryResponse,
+  UpdateFileMetaRequest,
+  UpdateFileMetaResponse
 } from "../../../types/api";
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -49,6 +54,11 @@ export const client = {
   search: (q: string) => api<SearchResponse>(`/api/search?${new URLSearchParams({ q })}`),
   saveFile: (body: SaveFileRequest) =>
     api<SaveFileResponse>("/api/file", { method: "POST", body: JSON.stringify(body) }),
+  updateFileMeta: (body: UpdateFileMetaRequest) =>
+    api<UpdateFileMetaResponse>("/api/file/meta", { method: "PATCH", body: JSON.stringify(body) }),
+  gitStatus: () => api<GitStatusResponse>("/api/git/status"),
+  gitCommit: (body: GitCommitRequest) =>
+    api<GitCommitResponse>("/api/git/commit", { method: "POST", body: JSON.stringify(body) }),
   createFile: (body: CreateFileRequest) =>
     api<CreateFileResponse>("/api/create", { method: "POST", body: JSON.stringify(body) }),
   renameFile: (body: RenameFileRequest) =>

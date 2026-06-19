@@ -9,6 +9,7 @@ import type {
   ExecutionSummary,
   ExecutionTask,
   FileDocument,
+  DocumentFrontMatter,
   FileMeta,
   RepoSummary,
   SectionKey,
@@ -20,6 +21,8 @@ import { ensureRecommendedFrontMatter } from "./documentModel.js";
 import {
   cleanCell as parseCleanCell,
   extractMarkdownTitle,
+  parseMarkdownDocument,
+  replaceFrontMatter,
   sectionBody as parseSectionBody,
   tableRows as parseTableRows,
   taskItems as parseTaskItems
@@ -176,6 +179,45 @@ function formatDate(date: Date): string {
 
 function todayDate(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function diffSummary(before: string, after: string): { added: number; removed: number; changed: number; preview: string } {
+  const beforeLines = before.replace(/\r\n/g, "\n").split("\n");
+  const afterLines = after.replace(/\r\n/g, "\n").split("\n");
+  let added = 0;
+  let removed = 0;
+  let changed = 0;
+  const preview: string[] = [];
+  const max = Math.max(beforeLines.length, afterLines.length);
+  for (let index = 0; index < max; index += 1) {
+    const left = beforeLines[index];
+    const right = afterLines[index];
+    if (left === right) {
+      if (preview.length < 80 && left !== undefined) preview.push(` ${left}`);
+      continue;
+    }
+    changed += 1;
+    if (left !== undefined) {
+      removed += 1;
+      if (preview.length < 80) preview.push(`-${left}`);
+    }
+    if (right !== undefined) {
+      added += 1;
+      if (preview.length < 80) preview.push(`+${right}`);
+    }
+  }
+  return { added, removed, changed, preview: preview.join("\n") };
+}
+
+function normalizeTagsValue(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function touchFrontMatter(text: string, relPath: string): string {
+  const withRecommended = ensureRecommendedFrontMatter(text, relPath);
+  const parsed = parseMarkdownDocument(withRecommended);
+  if (parsed.frontMatterError) return text;
+  return replaceFrontMatter(withRecommended, { ...parsed.frontMatter, updated: todayDate() });
 }
 
 function weekId(date = new Date()): string {
@@ -510,14 +552,21 @@ export function fileMeta(filePath: string): FileMeta {
   } catch {
     text = "";
   }
+  const document = parseMarkdownDocument(text);
+  const frontMatter = document.frontMatter;
   return {
+    id: typeof frontMatter.id === "string" ? frontMatter.id : undefined,
     path: displayPath(filePath),
     name: path.basename(filePath),
     title: extractTitle(text, path.basename(filePath, ".md")),
     section: pathSection(filePath),
     updated: formatDate(stat.mtime),
     size: stat.size,
-    excerpt: extractExcerpt(text)
+    excerpt: extractExcerpt(text),
+    tags: normalizeTagsValue(frontMatter.tags),
+    status: typeof frontMatter.status === "string" ? frontMatter.status : undefined,
+    favorite: frontMatter.favorite === true,
+    pinned: frontMatter.pinned === true
   };
 }
 
@@ -571,13 +620,37 @@ export function backupFile(filePath: string): string {
 
 export function saveFile(pathValue: string, content: string) {
   const filePath = resolveManaged(pathValue);
+  const before = fs.existsSync(filePath) ? readText(filePath) : "";
   const backup = fs.existsSync(filePath) ? backupFile(filePath) : undefined;
-  writeText(filePath, content);
+  const rel = relativePath(filePath);
+  const nextContent = touchFrontMatter(content, rel);
+  writeText(filePath, nextContent);
   return {
     ok: true as const,
     meta: fileMeta(filePath),
-    ...(backup ? { backup: relativePath(backup) } : {})
+    ...(backup ? { backup: relativePath(backup) } : {}),
+    diff: diffSummary(before, nextContent)
   };
+}
+
+export function updateFileFrontMatter(pathValue: string, patch: Partial<Pick<DocumentFrontMatter, "tags" | "status" | "favorite" | "pinned">>) {
+  const filePath = resolveManaged(pathValue);
+  const backup = backupFile(filePath);
+  const text = readText(filePath);
+  const rel = relativePath(filePath);
+  const withRecommended = ensureRecommendedFrontMatter(text, rel);
+  const parsed = parseMarkdownDocument(withRecommended);
+  if (parsed.frontMatterError) throw new Error(parsed.frontMatterError);
+  const allowed: Partial<DocumentFrontMatter> = {};
+  if (Array.isArray(patch.tags)) allowed.tags = normalizeTagsValue(patch.tags).slice(0, 12);
+  if (typeof patch.status === "string") allowed.status = patch.status.trim() || undefined;
+  if (typeof patch.favorite === "boolean") allowed.favorite = patch.favorite;
+  if (typeof patch.pinned === "boolean") allowed.pinned = patch.pinned;
+  const nextFrontMatter = Object.fromEntries(
+    Object.entries({ ...parsed.frontMatter, ...allowed, updated: todayDate() }).filter(([, value]) => value !== undefined && value !== "")
+  ) as DocumentFrontMatter;
+  writeText(filePath, replaceFrontMatter(withRecommended, nextFrontMatter));
+  return { ok: true as const, meta: fileMeta(filePath), backup: relativePath(backup) };
 }
 
 export function createFile(section: string, title: string, name: string) {

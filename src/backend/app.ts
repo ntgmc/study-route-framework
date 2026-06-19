@@ -20,9 +20,11 @@ import {
   repoSummary,
   saveFile,
   searchFiles,
+  updateFileFrontMatter,
   updateDashboardFocus
 } from "./markdownStore.js";
 import { MAX_ATTACHMENT_BYTES, saveAttachment, sendAttachmentPath } from "./attachments.js";
+import { commitLearningSnapshot, gitStatus } from "./gitWorkspace.js";
 import { aiSettings, aiStatus, generateMarkdown, LlmConfigError, LlmRequestError, saveAiSettings } from "./llm.js";
 import { currentWorkspaceSchemaVersion, healthReport } from "./workspace.js";
 
@@ -58,6 +60,10 @@ function stringRecord(value: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, String(item ?? "")]));
 }
 
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined;
+}
+
 export function createApp() {
   const app = express();
   app.use(express.json({ limit: "2mb" }));
@@ -72,11 +78,23 @@ export function createApp() {
   });
   app.get("/api/file", (request, response) => response.json(versioned(getFile(asString(request.query.path)) as unknown as Record<string, unknown>)));
   app.get("/api/search", (request, response) => response.json(versioned({ results: searchFiles(asString(request.query.q)) })));
+  app.get("/api/git/status", (_request, response) => response.json(versioned(gitStatus())));
   app.get("/api/ai/status", (_request, response) => response.json(versioned(aiStatus() as unknown as Record<string, unknown>, false)));
   app.get("/api/ai/settings", (_request, response) => response.json(versioned(aiSettings() as unknown as Record<string, unknown>, false)));
 
   app.post("/api/file", (request, response) => {
     response.json(versioned(saveFile(asString(request.body?.path), asString(request.body?.content))));
+  });
+  app.patch("/api/file/meta", (request, response) => {
+    response.json(versioned(updateFileFrontMatter(asString(request.body?.path), {
+      tags: stringArray(request.body?.tags),
+      status: typeof request.body?.status === "string" ? request.body.status : undefined,
+      favorite: typeof request.body?.favorite === "boolean" ? request.body.favorite : undefined,
+      pinned: typeof request.body?.pinned === "boolean" ? request.body.pinned : undefined
+    })));
+  });
+  app.post("/api/git/commit", (request, response) => {
+    response.json(versioned(commitLearningSnapshot(asString(request.body?.message))));
   });
   app.put("/api/ai/settings", (request, response) => {
     response.json(versioned(saveAiSettings(request.body) as unknown as Record<string, unknown>, false));

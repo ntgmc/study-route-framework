@@ -254,7 +254,10 @@ describe("markdown store", () => {
 
     const review = createReviewFromPlan({ planPath: "plans/2026-W26.md", week: "2026-W26" });
     expect(review).toMatchObject({ path: "reviews/2026-W26.md", existed: false });
-    expect(fs.readFileSync(path.join(tempRoot, "reviews", "2026-W26.md"), "utf8")).toContain("`plans/2026-W26.md`");
+    const reviewContent = fs.readFileSync(path.join(tempRoot, "reviews", "2026-W26.md"), "utf8");
+    expect(reviewContent).toContain("`plans/2026-W26.md`");
+    expect(reviewContent).toContain("| 来源 | 任务 | 结果 | 证据或产出 |");
+    expect(reviewContent).toContain("| logs/2026-06-17.md | Build dashboard | Done | demo link |");
 
     const adjustment = applyRouteAdjustment({
       routePath: "routes/demo.md",

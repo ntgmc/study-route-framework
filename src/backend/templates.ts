@@ -68,6 +68,11 @@ export function defaultContent(section: string, title: string): string {
 | 项目 | 计划 | 实际 | 判断 |
 | --- | --- | --- | --- |
 
+## 关键产出
+
+| 来源 | 任务 | 结果 | 证据或产出 |
+| --- | --- | --- | --- |
+
 ## 问题与调整
 
 ## 下期重点

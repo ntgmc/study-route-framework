@@ -389,6 +389,17 @@ function collectEvidence(): ExecutionEvidence[] {
   }
   for (const filePath of filePathsForSection("reviews")) {
     const meta = fileMeta(filePath);
+    for (const row of tableRows(readText(filePath), "关键产出")) {
+      const title = row.cells[3] || row.cells[2] || row.cells[1] || row.cells[0] || "";
+      if (!meaningful(title)) continue;
+      evidence.push({
+        id: `${meta.path}:${row.line}:${title}`,
+        title,
+        kind: "review",
+        source: meta,
+        detail: row.cells[1] ? `复盘任务：${row.cells[1]}` : "复盘关键产出"
+      });
+    }
     for (const item of bulletItems(readText(filePath), "关键产出")) {
       evidence.push({
         id: `${meta.path}:${item.line}:${item.text}`,
@@ -988,7 +999,9 @@ ${planText}
 
 ## 关键产出
 
-${completionText || "- "}
+| 来源 | 任务 | 结果 | 证据或产出 |
+| --- | --- | --- | --- |
+${completionText || "|  |  |  |  |"}
 
 ## 下周期调整
 

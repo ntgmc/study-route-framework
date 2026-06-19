@@ -48,6 +48,22 @@ beforeEach(() => {
   clearAiEnv();
   write(path.join(tempRoot, "dashboard.md"), "# Dashboard\n\n## 当前焦点\n\n- 主目标：A\n- 当前阶段：B\n- 本周重点：C\n- 今日任务：D\n");
   write(path.join(tempRoot, "plans", "demo.md"), "# Demo\n\nhello api");
+  write(
+    path.join(tempRoot, "routes", "demo.md"),
+    `# Demo Route
+
+## 阶段路线
+
+| 阶段 | 主题 | 关键任务 | 产出物 | 验收标准 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | API 闭环 | 生成计划 | 计划文件 | API 返回路径 | 进行中 |
+
+## 路线调整记录
+
+| 日期 | 调整内容 | 原因 |
+| --- | --- | --- |
+`
+  );
 });
 
 afterEach(() => {
@@ -61,6 +77,7 @@ describe("api", () => {
     const app = createApp();
     const summary = await request(app).get("/api/summary").expect(200);
     expect(summary.body.dataMode).toBe("external");
+    expect(summary.body.execution.todayTasks[0].title).toBe("D");
 
     const files = await request(app).get("/api/files?section=plans").expect(200);
     expect(files.body.files[0].path).toBe("plans/demo.md");
@@ -82,6 +99,47 @@ describe("api", () => {
 
     const archived = await request(app).post("/api/archive").send({ path: "plans/renamed.md" }).expect(200);
     expect(archived.body.archived_to).toContain(".trash/study-gui");
+  });
+
+  it("serves execution generation and route adjustment APIs", async () => {
+    const app = createApp();
+
+    const plan = await request(app)
+      .post("/api/plans/from-route")
+      .send({ routePath: "routes/demo.md", week: "2026-W26" })
+      .expect(201);
+    expect(plan.body).toMatchObject({ ok: true, path: "plans/2026-W26.md", existed: false });
+
+    const existingPlan = await request(app)
+      .post("/api/plans/from-route")
+      .send({ routePath: "routes/demo.md", week: "2026-W26" })
+      .expect(201);
+    expect(existingPlan.body.existed).toBe(true);
+
+    const log = await request(app)
+      .post("/api/logs/from-plan")
+      .send({ planPath: "plans/2026-W26.md", date: "2026-06-19" })
+      .expect(201);
+    expect(log.body).toMatchObject({ ok: true, path: "logs/2026-06-19.md", existed: false });
+
+    const review = await request(app)
+      .post("/api/reviews/from-plan")
+      .send({ planPath: "plans/2026-W26.md", week: "2026-W26" })
+      .expect(201);
+    expect(review.body).toMatchObject({ ok: true, path: "reviews/2026-W26.md", existed: false });
+
+    const adjustment = await request(app)
+      .post("/api/routes/adjustment")
+      .send({ routePath: "routes/demo.md", date: "2026-06-19", suggestion: "调整当前阶段", reason: "API test" })
+      .expect(200);
+    expect(adjustment.body.backup).toContain(".backups/study-gui");
+  });
+
+  it("rejects invalid execution generation paths", async () => {
+    const app = createApp();
+    await request(app).post("/api/plans/from-route").send({ routePath: "" }).expect(400);
+    await request(app).post("/api/logs/from-plan").send({ planPath: "../outside.md" }).expect(400);
+    await request(app).post("/api/routes/adjustment").send({ routePath: "plans/demo.md", suggestion: "bad" }).expect(400);
   });
 
   it("reports ai status and rejects generation without key", async () => {

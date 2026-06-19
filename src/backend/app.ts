@@ -4,8 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   appendDailyLog,
+  applyRouteAdjustment,
   archiveFile,
   createFile,
+  createLogFromPlan,
+  createPlanFromRoute,
+  createReviewFromPlan,
   getFile,
   listMarkdownFiles,
   renameFile,
@@ -72,6 +76,18 @@ export function createApp() {
   });
   app.post("/api/logs/daily", (request, response) => {
     response.json(appendDailyLog(stringRecord(request.body)));
+  });
+  app.post("/api/plans/from-route", (request, response) => {
+    response.status(201).json(createPlanFromRoute(stringRecord(request.body)));
+  });
+  app.post("/api/logs/from-plan", (request, response) => {
+    response.status(201).json(createLogFromPlan(stringRecord(request.body)));
+  });
+  app.post("/api/reviews/from-plan", (request, response) => {
+    response.status(201).json(createReviewFromPlan(stringRecord(request.body)));
+  });
+  app.post("/api/routes/adjustment", (request, response) => {
+    response.json(applyRouteAdjustment(stringRecord(request.body)));
   });
   app.post("/api/ai/generate", async (request, response, next) => {
     try {

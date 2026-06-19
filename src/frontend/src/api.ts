@@ -2,10 +2,18 @@ import type {
   AiGenerateRequest,
   AiGenerateResponse,
   AiStatusResponse,
+  ApplyRouteAdjustmentRequest,
+  ApplyRouteAdjustmentResponse,
   ArchiveFileRequest,
   ArchiveFileResponse,
+  CreateLogFromPlanRequest,
+  CreateLogFromPlanResponse,
   CreateFileRequest,
   CreateFileResponse,
+  CreatePlanFromRouteRequest,
+  CreatePlanFromRouteResponse,
+  CreateReviewFromPlanRequest,
+  CreateReviewFromPlanResponse,
   DailyLogRequest,
   DailyLogResponse,
   DashboardFocusRequest,
@@ -47,6 +55,14 @@ export const client = {
     api<DashboardFocusResponse>("/api/dashboard/focus", { method: "POST", body: JSON.stringify(body) }),
   appendLog: (body: DailyLogRequest) =>
     api<DailyLogResponse>("/api/logs/daily", { method: "POST", body: JSON.stringify(body) }),
+  createPlanFromRoute: (body: CreatePlanFromRouteRequest) =>
+    api<CreatePlanFromRouteResponse>("/api/plans/from-route", { method: "POST", body: JSON.stringify(body) }),
+  createLogFromPlan: (body: CreateLogFromPlanRequest) =>
+    api<CreateLogFromPlanResponse>("/api/logs/from-plan", { method: "POST", body: JSON.stringify(body) }),
+  createReviewFromPlan: (body: CreateReviewFromPlanRequest) =>
+    api<CreateReviewFromPlanResponse>("/api/reviews/from-plan", { method: "POST", body: JSON.stringify(body) }),
+  applyRouteAdjustment: (body: ApplyRouteAdjustmentRequest) =>
+    api<ApplyRouteAdjustmentResponse>("/api/routes/adjustment", { method: "POST", body: JSON.stringify(body) }),
   aiStatus: () => api<AiStatusResponse>("/api/ai/status"),
   aiGenerate: (body: AiGenerateRequest) =>
     api<AiGenerateResponse>("/api/ai/generate", { method: "POST", body: JSON.stringify(body) })

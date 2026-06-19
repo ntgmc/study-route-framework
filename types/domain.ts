@@ -36,6 +36,74 @@ export interface FileMeta {
   snippet?: string;
 }
 
+export interface ExecutionTask {
+  id: string;
+  title: string;
+  status: string;
+  priority: "high" | "medium" | "low";
+  dueDate?: string;
+  output?: string;
+  source: FileMeta;
+  sourceDetail: string;
+}
+
+export interface ExecutionRouteProgress {
+  route: FileMeta;
+  currentStage: string;
+  currentTheme: string;
+  keyTask: string;
+  output: string;
+  acceptance: string;
+  status: string;
+  nextStage?: string;
+}
+
+export interface ExecutionBlocker {
+  id: string;
+  problem: string;
+  count: number;
+  firstSeen: string;
+  latestSeen: string;
+  source: FileMeta;
+  nextStep: string;
+}
+
+export interface ExecutionEvidence {
+  id: string;
+  title: string;
+  kind: "log" | "review" | "file";
+  source: FileMeta;
+  detail: string;
+}
+
+export interface ExecutionReviewItem {
+  id: string;
+  plan: FileMeta;
+  reviewPath: string;
+  status: "missing" | "empty" | "ready";
+  reason: string;
+}
+
+export interface ExecutionAdjustmentSuggestion {
+  id: string;
+  title: string;
+  reason: string;
+  action: string;
+  routePath?: string;
+}
+
+export interface ExecutionSummary {
+  week: string;
+  activePlan?: FileMeta;
+  todayTasks: ExecutionTask[];
+  unfinishedTasks: ExecutionTask[];
+  routeProgress: ExecutionRouteProgress[];
+  blockers: ExecutionBlocker[];
+  evidence: ExecutionEvidence[];
+  pendingReviews: ExecutionReviewItem[];
+  suggestions: ExecutionAdjustmentSuggestion[];
+}
+
 export interface RepoStats {
   files: number;
   sections: number;
@@ -52,6 +120,7 @@ export interface RepoSummary {
   stats: RepoStats;
   focus: Record<string, string>;
   recent: FileMeta[];
+  execution: ExecutionSummary;
 }
 
 export interface FileDocument {

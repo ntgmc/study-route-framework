@@ -41,7 +41,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import type { EditorView, ViewUpdate } from "@codemirror/view";
-import type { FileMeta, RepoSummary, SectionKey } from "../../../types/domain";
+import type { ExecutionAdjustmentSuggestion, FileMeta, RepoSummary, SectionKey } from "../../../types/domain";
 import { client } from "./api";
 import {
   clearDraft,
@@ -1393,6 +1393,7 @@ function DiffDialog({
 
 function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpen: (file: FileMeta) => Promise<void>; onRefresh: () => Promise<void> }) {
   const setStatus = useAppStore((state) => state.setStatus);
+  const execution = summary.execution;
   const [focus, setFocus] = useState({
     main_goal: summary.focus[focusLabels.main_goal] || "",
     stage: summary.focus[focusLabels.stage] || "",
@@ -1424,20 +1425,223 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
     setStatus(`已追加日志 ${result.path}`);
   }
 
+  async function createPlanFromRoute() {
+    const route = execution.routeProgress[0]?.route;
+    if (!route) throw new Error("当前没有可用于生成周计划的路线");
+    const result = await client.createPlanFromRoute({ routePath: route.path, week: execution.week });
+    await onRefresh();
+    await onOpen(result.meta);
+    setStatus(result.existed ? `已打开现有周计划 ${result.path}` : `已生成周计划 ${result.path}`);
+  }
+
+  async function createLogFromPlan() {
+    const plan = execution.activePlan;
+    if (!plan) throw new Error("当前没有可用于生成今日日志的周计划");
+    const result = await client.createLogFromPlan({ planPath: plan.path, date: summary.today });
+    await onRefresh();
+    await onOpen(result.meta);
+    setStatus(result.existed ? `已打开今日日志 ${result.path}` : `已生成今日日志 ${result.path}`);
+  }
+
+  async function createReviewFromPlan(planPath = execution.activePlan?.path) {
+    if (!planPath) throw new Error("当前没有可用于生成周复盘的计划");
+    const result = await client.createReviewFromPlan({ planPath, week: execution.week });
+    await onRefresh();
+    await onOpen(result.meta);
+    setStatus(result.existed ? `已打开现有周复盘 ${result.path}` : `已生成周复盘 ${result.path}`);
+  }
+
+  async function applySuggestion(suggestion: ExecutionAdjustmentSuggestion) {
+    const routePath = suggestion.routePath || execution.routeProgress[0]?.route.path;
+    if (!routePath) throw new Error("当前没有可应用调整建议的路线");
+    const result = await client.applyRouteAdjustment({
+      routePath,
+      suggestion: suggestion.action,
+      reason: suggestion.reason,
+      date: summary.today
+    });
+    await onRefresh();
+    await onOpen(result.meta);
+    setStatus(`已追加路线调整 ${result.path}`);
+  }
+
   return (
     <section className="overflow-auto p-5">
-      <div className="mb-4 grid grid-cols-4 gap-3 max-[920px]:grid-cols-1">
+      <div className="mb-4 grid grid-cols-4 gap-3 max-[920px]:grid-cols-2 max-[560px]:grid-cols-1">
         {[
-          ["文件", summary.stats.files],
-          ["分类", summary.stats.sections],
-          ["日志", summary.stats.logs],
-          ["计划", summary.stats.plans]
+          ["今日任务", execution.todayTasks.length],
+          ["未完成计划", execution.unfinishedTasks.length],
+          ["阻塞项", execution.blockers.length],
+          ["待复盘", execution.pendingReviews.length]
         ].map(([label, value]) => (
           <div key={label} className="rounded-lg border border-line bg-white p-4">
             <strong className="block text-3xl leading-tight">{value}</strong>
             <span className="text-sm text-muted">{label}</span>
           </div>
         ))}
+      </div>
+
+      <Panel
+        title="今天做什么"
+        action={<Button variant="primary" onClick={() => createLogFromPlan().catch((error: Error) => setStatus(error.message, true))}><FilePlus2 className="h-4 w-4" />从周计划生成今日日志</Button>}
+      >
+        {execution.todayTasks.length ? (
+          <div className="grid gap-2 p-3">
+            {execution.todayTasks.map((task) => (
+              <div key={task.id} className="rounded-lg border border-line bg-white p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-semibold [overflow-wrap:anywhere]">{task.title}</div>
+                    <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">
+                      {task.status} · {task.sourceDetail}{task.dueDate ? ` · ${task.dueDate}` : ""}{task.output ? ` · ${task.output}` : ""}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <PriorityBadge value={task.priority} />
+                    <Button type="button" onClick={() => onOpen(task.source).catch((error: Error) => setStatus(error.message, true))}>
+                      <Eye className="h-4 w-4" />
+                      打开
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState text="今天还没有明确任务。先从当前路线生成本周计划，或补充 dashboard 的今日任务。" />
+        )}
+      </Panel>
+
+      <div className="grid grid-cols-[1.2fr_.8fr] gap-4 max-[1100px]:grid-cols-1">
+        <Panel
+          title="当前路线推进到哪"
+          action={<Button onClick={() => createPlanFromRoute().catch((error: Error) => setStatus(error.message, true))}><GitCompare className="h-4 w-4" />从路线生成周计划</Button>}
+        >
+          {execution.routeProgress.length ? (
+            <div className="grid gap-2 p-3">
+              {execution.routeProgress.map((route) => (
+                <div key={route.route.path} className="rounded-lg border border-line bg-white p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-semibold [overflow-wrap:anywhere]">{route.route.title}</div>
+                      <div className="mt-1 text-sm [overflow-wrap:anywhere]">
+                        阶段 {route.currentStage || "未标记"} · {route.currentTheme || "未填写主题"} · {route.status}
+                      </div>
+                      <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">
+                        {route.keyTask || "没有关键任务"}{route.output ? ` · 产出：${route.output}` : ""}{route.nextStage ? ` · 下一阶段：${route.nextStage}` : ""}
+                      </div>
+                    </div>
+                    <Button type="button" onClick={() => onOpen(route.route).catch((error: Error) => setStatus(error.message, true))}>
+                      <Eye className="h-4 w-4" />
+                      打开路线
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="还没有能识别的路线阶段。路线文件需要包含“阶段路线”表格。" />
+          )}
+        </Panel>
+
+        <Panel
+          title="哪些计划没完成"
+          action={execution.activePlan ? <Button onClick={() => onOpen(execution.activePlan as FileMeta).catch((error: Error) => setStatus(error.message, true))}><Eye className="h-4 w-4" />打开当前计划</Button> : undefined}
+        >
+          {execution.unfinishedTasks.length ? (
+            <div className="grid gap-2 p-3">
+              {execution.unfinishedTasks.slice(0, 6).map((task) => (
+                <button key={task.id} type="button" className="rounded-lg border border-line bg-white p-3 text-left hover:border-brand" onClick={() => onOpen(task.source).catch((error: Error) => setStatus(error.message, true))}>
+                  <div className="font-semibold [overflow-wrap:anywhere]">{task.title}</div>
+                  <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">{task.status} · {task.source.path}{task.dueDate ? ` · ${task.dueDate}` : ""}</div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="没有识别到未完成计划项。" />
+          )}
+        </Panel>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 max-[1100px]:grid-cols-1">
+        <Panel title="哪些问题反复出现">
+          {execution.blockers.length ? (
+            <div className="grid gap-2 p-3">
+              {execution.blockers.map((blocker) => (
+                <button key={blocker.id} type="button" className="rounded-lg border border-line bg-white p-3 text-left hover:border-brand" onClick={() => onOpen(blocker.source).catch((error: Error) => setStatus(error.message, true))}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="font-semibold [overflow-wrap:anywhere]">{blocker.problem}</div>
+                    <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">{blocker.count} 次</span>
+                  </div>
+                  <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">最近：{blocker.source.path} · 下一步：{blocker.nextStep || "未填写"}</div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="没有识别到阻塞项。" />
+          )}
+        </Panel>
+
+        <Panel title="最近有什么产出">
+          {execution.evidence.length ? (
+            <div className="grid gap-2 p-3">
+              {execution.evidence.map((item) => (
+                <button key={item.id} type="button" className="rounded-lg border border-line bg-white p-3 text-left hover:border-brand" onClick={() => onOpen(item.source).catch((error: Error) => setStatus(error.message, true))}>
+                  <div className="font-semibold [overflow-wrap:anywhere]">{item.title}</div>
+                  <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">{item.detail} · {item.source.path}</div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="最近日志和复盘里还没有可追踪产出。" />
+          )}
+        </Panel>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 max-[1100px]:grid-cols-1">
+        <Panel title="待复盘">
+          {execution.pendingReviews.length ? (
+            <div className="grid gap-2 p-3">
+              {execution.pendingReviews.map((item) => (
+                <div key={item.id} className="rounded-lg border border-line bg-white p-3">
+                  <div className="font-semibold [overflow-wrap:anywhere]">{item.plan.title}</div>
+                  <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">{item.reason} · {item.reviewPath}</div>
+                  <div className="mt-3 flex justify-end gap-2">
+                    <Button type="button" onClick={() => onOpen(item.plan).catch((error: Error) => setStatus(error.message, true))}>打开计划</Button>
+                    <Button type="button" variant="primary" onClick={() => createReviewFromPlan(item.plan.path).catch((error: Error) => setStatus(error.message, true))}>
+                      <FilePlus2 className="h-4 w-4" />
+                      生成复盘
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="当前没有待复盘计划。" />
+          )}
+        </Panel>
+
+        <Panel title="下一步应该调整什么">
+          {execution.suggestions.length ? (
+            <div className="grid gap-2 p-3">
+              {execution.suggestions.map((suggestion) => (
+                <div key={suggestion.id} className="rounded-lg border border-line bg-white p-3">
+                  <div className="font-semibold [overflow-wrap:anywhere]">{suggestion.title}</div>
+                  <div className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">原因：{suggestion.reason}</div>
+                  <div className="mt-2 text-sm [overflow-wrap:anywhere]">{suggestion.action}</div>
+                  <div className="mt-3 flex justify-end">
+                    <Button type="button" variant="primary" onClick={() => applySuggestion(suggestion).catch((error: Error) => setStatus(error.message, true))}>
+                      <Check className="h-4 w-4" />
+                      应用到路线
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="当前没有明确的路线调整建议。" />
+          )}
+        </Panel>
       </div>
 
       <Panel title="当前焦点" action={<Button variant="primary" onClick={() => saveFocus().catch((error: Error) => setStatus(error.message, true))}><Check className="h-4 w-4" />保存焦点</Button>}>
@@ -1469,6 +1673,20 @@ function Dashboard({ summary, onOpen, onRefresh }: { summary: RepoSummary; onOpe
       </Panel>
     </section>
   );
+}
+
+function PriorityBadge({ value }: { value: "high" | "medium" | "low" }) {
+  const config = {
+    high: "bg-red-50 text-red-700",
+    medium: "bg-amber-50 text-amber-700",
+    low: "bg-slate-100 text-slate-600"
+  }[value];
+  const label = { high: "高", medium: "中", low: "低" }[value];
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${config}`}>{label}</span>;
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <div className="p-6 text-center text-sm text-muted">{text}</div>;
 }
 
 function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {

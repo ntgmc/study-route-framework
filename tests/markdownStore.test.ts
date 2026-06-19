@@ -5,8 +5,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveDataConfig } from "../src/backend/config.js";
 import {
   appendDailyLog,
+  applyRouteAdjustment,
   archiveFile,
   createFile,
+  createLogFromPlan,
+  createPlanFromRoute,
+  createReviewFromPlan,
+  executionSummary,
   getFile,
   isManagedPath,
   listMarkdownFiles,
@@ -42,8 +47,76 @@ beforeEach(() => {
 | --- | --- | --- | --- | --- |
 `
   );
-  write(path.join(tempRoot, "plans", "demo.md"), "# Demo Plan\n\nBody keyword");
-  write(path.join(tempRoot, "logs", "2026-06-17.md"), "# 学习记录\n\n## 今日完成\n\n| 任务 | 结果 | 用时 | 证据或产出 |\n| --- | --- | ---: | --- |\n\n## 关键收获\n\n## 明日计划\n");
+  write(
+    path.join(tempRoot, "routes", "demo.md"),
+    `# Demo Route
+
+## 阶段路线
+
+| 阶段 | 主题 | 关键任务 | 产出物 | 验收标准 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Dashboard 闭环 | 打通执行闭环 | demo 链接 | 能从 Dashboard 进入下一步 | 进行中 |
+| 2 | 复盘优化 | 根据复盘调整路线 | 调整记录 | 有路线调整记录 | 未开始 |
+
+## 路线调整记录
+
+| 日期 | 调整内容 | 原因 |
+| --- | --- | --- |
+`
+  );
+  write(
+    path.join(tempRoot, "plans", "demo.md"),
+    `# Demo Plan
+
+Body keyword
+
+## 基本信息
+
+- 关联路线：\`routes/demo.md\`
+
+## 任务安排
+
+| 日期 | 任务 | 预计用时 | 产出物 | 状态 |
+| --- | --- | ---: | --- | --- |
+|  | Build dashboard | 2h | demo link | 未开始 |
+| 2026-06-10 | Old task | 1h |  | 进行中 |
+
+## 每日最低动作
+
+- [ ] Daily note
+
+## 重点问题
+
+| 问题 | 解决路径 | 截止时间 |
+| --- | --- | --- |
+| Parser blocked | Add tests | 2026-06-20 |
+
+## 复盘入口
+
+- 对应复盘文件：\`reviews/demo.md\`
+`
+  );
+  write(
+    path.join(tempRoot, "logs", "2026-06-17.md"),
+    `# 学习记录
+
+## 今日完成
+
+| 任务 | 结果 | 用时 | 证据或产出 |
+| --- | --- | ---: | --- |
+| Build dashboard | Done | 1h | demo link |
+
+## 关键收获
+
+## 遇到的问题
+
+| 问题 | 当前判断 | 下一步 |
+| --- | --- | --- |
+| Parser blocked | 表格解析不稳定 | Add tests |
+
+## 明日计划
+`
+  );
 });
 
 afterEach(() => {
@@ -124,5 +197,47 @@ describe("markdown store", () => {
     expect(content).toContain("| Task | Done | 1h | plans/demo.md |");
     expect(content).toContain("- Keep notes");
     expect(content).toContain("- Review");
+  });
+
+  it("builds an execution summary from routes, plans, logs, and reviews", () => {
+    const summary = executionSummary();
+    expect(summary.todayTasks.map((item) => item.title)).toEqual(expect.arrayContaining(["旧任务", "Build dashboard", "Daily note"]));
+    expect(summary.unfinishedTasks.map((item) => item.title)).toContain("Old task");
+    expect(summary.routeProgress[0]).toMatchObject({
+      currentTheme: "Dashboard 闭环",
+      keyTask: "打通执行闭环",
+      status: "进行中"
+    });
+    expect(summary.blockers.find((item) => item.problem === "Parser blocked")?.count).toBe(2);
+    expect(summary.evidence.map((item) => item.title)).toContain("demo link");
+    expect(summary.pendingReviews[0]).toMatchObject({ reviewPath: "reviews/demo.md", status: "missing" });
+    expect(summary.suggestions.map((item) => item.id)).toEqual(expect.arrayContaining(["blocker-adjustment", "unfinished-plan-adjustment", "review-adjustment"]));
+  });
+
+  it("generates plan, log, review, and route adjustment files without overwriting existing content", () => {
+    const plan = createPlanFromRoute({ routePath: "routes/demo.md", week: "2026-W26" });
+    expect(plan).toMatchObject({ path: "plans/2026-W26.md", existed: false });
+    expect(fs.readFileSync(path.join(tempRoot, "plans", "2026-W26.md"), "utf8")).toContain("`routes/demo.md`");
+
+    const existingPlan = createPlanFromRoute({ routePath: "routes/demo.md", week: "2026-W26" });
+    expect(existingPlan.existed).toBe(true);
+
+    const log = createLogFromPlan({ planPath: "plans/2026-W26.md", date: "2026-06-19" });
+    expect(log).toMatchObject({ path: "logs/2026-06-19.md", existed: false });
+    expect(fs.readFileSync(path.join(tempRoot, "logs", "2026-06-19.md"), "utf8")).toContain("`plans/2026-W26.md`");
+
+    const review = createReviewFromPlan({ planPath: "plans/2026-W26.md", week: "2026-W26" });
+    expect(review).toMatchObject({ path: "reviews/2026-W26.md", existed: false });
+    expect(fs.readFileSync(path.join(tempRoot, "reviews", "2026-W26.md"), "utf8")).toContain("`plans/2026-W26.md`");
+
+    const adjustment = applyRouteAdjustment({
+      routePath: "routes/demo.md",
+      date: "2026-06-19",
+      suggestion: "收敛当前阶段任务",
+      reason: "存在未完成计划"
+    });
+    expect(adjustment.backup).toContain(".backups/study-gui");
+    const route = fs.readFileSync(path.join(tempRoot, "routes", "demo.md"), "utf8");
+    expect(route).toContain("| 2026-06-19 | 收敛当前阶段任务 | 存在未完成计划 |");
   });
 });

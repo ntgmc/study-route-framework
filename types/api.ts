@@ -88,6 +88,57 @@ export interface DailyLogResponse {
   meta: FileMeta;
 }
 
+export interface CreatePlanFromRouteRequest {
+  routePath: string;
+  week?: string;
+}
+
+export interface CreatePlanFromRouteResponse {
+  ok: true;
+  path: string;
+  existed: boolean;
+  meta: FileMeta;
+}
+
+export interface CreateLogFromPlanRequest {
+  planPath: string;
+  date?: string;
+}
+
+export interface CreateLogFromPlanResponse {
+  ok: true;
+  path: string;
+  existed: boolean;
+  backup?: string;
+  meta: FileMeta;
+}
+
+export interface CreateReviewFromPlanRequest {
+  planPath: string;
+  week?: string;
+}
+
+export interface CreateReviewFromPlanResponse {
+  ok: true;
+  path: string;
+  existed: boolean;
+  meta: FileMeta;
+}
+
+export interface ApplyRouteAdjustmentRequest {
+  routePath: string;
+  suggestion: string;
+  reason?: string;
+  date?: string;
+}
+
+export interface ApplyRouteAdjustmentResponse {
+  ok: true;
+  path: string;
+  backup: string;
+  meta: FileMeta;
+}
+
 export interface AiStatusResponse {
   configured: boolean;
   provider: string;

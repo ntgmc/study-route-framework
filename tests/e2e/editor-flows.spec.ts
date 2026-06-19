@@ -1,15 +1,20 @@
 import { expect, test } from "@playwright/test";
 import {
   appendEditorText,
+  clickPlanFile,
   editorText,
   openPlan,
   resetE2eWorkspace,
+  waitForAppReady,
   writeAiOperation
 } from "./fixtures/workspace";
 
 test.beforeEach(async ({ page }) => {
   resetE2eWorkspace();
+  const summary = page.waitForResponse((response) => response.url().includes("/api/summary") && response.ok());
   await page.goto("/");
+  await summary;
+  await waitForAppReady(page);
 });
 
 test("edits, saves, and reloads a markdown file", async ({ page }) => {
@@ -22,9 +27,9 @@ test("edits, saves, and reloads a markdown file", async ({ page }) => {
   await page.getByTestId("save-button").click();
   await expect(page.getByTestId("save-state")).toHaveAttribute("data-save-state", "saved");
 
-  await page.getByTestId("file-item-plans/second.md").click();
+  await clickPlanFile(page, "plans/second.md");
   await expect(page.getByTestId("current-file-path")).toContainText("plans/second.md");
-  await page.getByTestId("file-item-plans/demo.md").click();
+  await clickPlanFile(page, "plans/demo.md");
   await expect(page.getByTestId("current-file-path")).toContainText("plans/demo.md");
   await expect.poll(() => editorText(page)).toContain(uniqueLine);
 });
@@ -34,12 +39,12 @@ test("protects unsaved edits when switching files", async ({ page }) => {
   await appendEditorText(page, `Unsaved switch guard ${Date.now()}`);
   await expect(page.getByTestId("save-state")).toHaveAttribute("data-save-state", "dirty");
 
-  await page.getByTestId("file-item-plans/second.md").click();
+  await clickPlanFile(page, "plans/second.md");
   await expect(page.getByTestId("toast-message")).toBeVisible();
   await page.getByTestId("toast-cancel").click();
   await expect(page.getByTestId("current-file-path")).toContainText("plans/demo.md");
 
-  await page.getByTestId("file-item-plans/second.md").click();
+  await clickPlanFile(page, "plans/second.md");
   await page.getByTestId("toast-confirm").click();
   await expect(page.getByTestId("current-file-path")).toContainText("plans/second.md");
 });
@@ -52,14 +57,18 @@ test("restores and discards local drafts", async ({ page, context }) => {
 
   await page.close({ runBeforeUnload: false });
   const restoredPage = await context.newPage();
+  const restoredSummary = restoredPage.waitForResponse((response) => response.url().includes("/api/summary") && response.ok());
   await restoredPage.goto("/");
+  await restoredSummary;
   await expect(restoredPage.getByTestId("toast-message")).toBeVisible();
   await restoredPage.getByTestId("toast-action-restore").click();
   await expect.poll(() => editorText(restoredPage)).toContain(draftLine);
 
   await restoredPage.close({ runBeforeUnload: false });
   const discardPage = await context.newPage();
+  const discardSummary = discardPage.waitForResponse((response) => response.url().includes("/api/summary") && response.ok());
   await discardPage.goto("/");
+  await discardSummary;
   await expect(discardPage.getByTestId("toast-message")).toBeVisible();
   await discardPage.getByTestId("toast-action-discard").click();
   await expect.poll(() => editorText(discardPage)).not.toContain(draftLine);

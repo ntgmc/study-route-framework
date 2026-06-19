@@ -33,6 +33,8 @@ node_modules/
 dist/
 coverage/
 .tmp/
+test-results/
+playwright-report/
 
 # Runtime artifacts
 .backups/

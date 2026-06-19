@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export const e2eDataDir = path.resolve(".tmp", "e2e-data", "default");
 
@@ -124,10 +124,40 @@ export function writeAiOperation(id: string, content: string): void {
   );
 }
 
+function planTitle(pathValue: string): string {
+  if (pathValue === "plans/demo.md") return "E2E Demo Plan";
+  if (pathValue === "plans/second.md") return "E2E Second Plan";
+  return path.basename(pathValue, ".md");
+}
+
+function firstAvailable(...locators: Locator[]): Locator {
+  return locators.reduce((left, right) => left.or(right));
+}
+
+export async function waitForAppReady(page: Page): Promise<void> {
+  await expect(
+    firstAvailable(
+      page.getByTestId("section-plans"),
+      page.getByRole("button", { name: /计划|Plans/i })
+    ).first()
+  ).toBeVisible();
+}
+
+export async function clickPlanFile(page: Page, pathValue: string): Promise<void> {
+  await firstAvailable(
+    page.getByTestId(`file-item-${pathValue}`),
+    page.getByRole("button", { name: new RegExp(planTitle(pathValue), "i") })
+  ).first().click();
+}
+
 export async function openPlan(page: Page, pathValue: string): Promise<void> {
-  await page.getByTestId("section-plans").click();
-  await page.getByTestId(`file-item-${pathValue}`).click();
-  await page.getByTestId("current-file-path").waitFor();
+  await waitForAppReady(page);
+  await firstAvailable(
+    page.getByTestId("section-plans"),
+    page.getByRole("button", { name: /计划|Plans/i })
+  ).first().click();
+  await clickPlanFile(page, pathValue);
+  await expect(page.getByTestId("current-file-path")).toContainText(pathValue);
 }
 
 export async function editorText(page: Page): Promise<string> {

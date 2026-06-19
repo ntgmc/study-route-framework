@@ -15,6 +15,7 @@ export default defineConfig({
   use: {
     ...devices["Desktop Chrome"],
     baseURL: "http://127.0.0.1:5173",
+    serviceWorkers: "block",
     trace: "retain-on-failure"
   },
   projects: [

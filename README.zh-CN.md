@@ -78,6 +78,49 @@ sh scripts/study.sh init-log --date 2026-06-17
 sh scripts/study.sh week-plan --week 2026-W26 --theme "Framework demo" --hours "3h"
 ```
 
+## 日常使用方法
+
+这个框架推荐用 Web GUI 阅读和编辑，用 CLI 做快速追加记录。
+
+推荐的日常流程：
+
+1. 启动 Web GUI，打开 `http://127.0.0.1:8765`。
+2. 编辑前先看左侧栏。侧栏会显示当前使用的是 `demo-data/` 还是私有 `STUDY_ROUTE_DATA_DIR`，并显示实际写入的数据根目录。
+3. 把 `总览` 当作首页使用。`下一步` 卡片会打开当前最应该处理的动作，例如生成周计划、生成今日日志、打开当前任务来源或生成复盘。
+4. 需要直接维护焦点或快速补日志时，展开总览页的 `手动维护`，填写 `当前焦点` 或 `追加今日日志` 后保存。
+5. 从左侧栏进入 `routes`、`plans`、`logs`、`reviews`、`projects`、`records`、`resources`、`exams` 等分类，浏览对应目录下的 Markdown 文件。
+6. 选择文件后，在编辑器里修改 Markdown；可在编辑、分屏预览、预览模式之间切换；确认后点击 `保存`。保存已有文件前会自动在 `.backups/study-gui/` 下写入备份。
+7. 点击 `新建` 可以在托管分类中创建 Markdown 文件。默认使用当前分类；如果要写入其它分类，在弹窗里切换。
+8. 使用 `重命名` 修改文件名，使用 `归档` 把文件移动到 `.trash/study-gui/`。`dashboard.md` 不能重命名或归档。
+9. 使用 `全局搜索` 跨当前数据根目录查找内容；在分类页中可用 `筛选当前分类`、排序、标签、收藏和置顶管理文件。
+10. 在编辑器中点击附件按钮可以上传图片、PDF 或其它文件。文件会复制到 `attachments/YYYY/MM/`，编辑器会插入相对 Markdown 链接。
+
+CLI 的典型用法：
+
+```powershell
+.\scripts\study.ps1 init-log
+.\scripts\study.ps1 add-log --done "阅读第 1 章|完成笔记|45m|logs/2026-06-19.md" --takeaway "先总结再编码" --next "实现一个练习"
+.\scripts\study.ps1 leetcode --topic "数组" --title "Two Sum" --difficulty "Easy" --result "已完成" --redo "否"
+.\scripts\study.ps1 exam-review --subject "高数" --actual "2h" --done "复习极限" --problem "代数细节错误" --next "重做错题"
+.\scripts\study.ps1 dashboard --today "整理 API 笔记" --progress "后端路线|进行中|HTTP 基础|补充示例"
+```
+
+Linux/macOS 使用相同参数，通过 `sh scripts/study.sh` 执行。
+
+这些命令会写入当前数据根目录中的固定位置：
+
+| 命令 | 更新内容 |
+| --- | --- |
+| `init-log` | 如果不存在，则创建 `logs/YYYY-MM-DD.md` |
+| `add-log` | 向 `logs/YYYY-MM-DD.md` 追加完成项、收获、问题、下一步或备注 |
+| `leetcode` | 向 `records/leetcode.md` 追加一行刷题记录 |
+| `exam-review` | 向 `records/exam-review.md` 追加一行考试复盘记录 |
+| `dashboard` | 更新 `dashboard.md` 里的焦点字段和进度行 |
+| `week-plan` | 创建 `plans/YYYY-WNN.md`；如果文件已存在，需要加 `--force` 才会覆盖 |
+| `health`、`doctor`、`migrate` | 检查或迁移当前工作区；需要机器可读输出时加 `--json` |
+
+需要查看、改写完整文档时使用 GUI；已经明确要追加一条小记录时使用 CLI。
+
 ## 接入私有数据仓库
 
 创建一个私有内容仓库，推荐结构如下：

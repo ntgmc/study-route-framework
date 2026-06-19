@@ -79,6 +79,49 @@ sh scripts/study.sh init-log --date 2026-06-17
 sh scripts/study.sh week-plan --week 2026-W26 --theme "Framework demo" --hours "3h"
 ```
 
+## Everyday Usage
+
+The framework is meant to be used from the Web GUI for reading and editing, with the CLI available for quick append-only updates.
+
+Recommended daily flow:
+
+1. Start the Web GUI and open `http://127.0.0.1:8765`.
+2. Check the sidebar before editing. It shows whether you are using `demo-data/` or a private `STUDY_ROUTE_DATA_DIR`, plus the exact data root that will be written.
+3. Use `总览` as the home screen. The `下一步` card opens the next useful action, such as generating a weekly plan, generating today's log, opening the current task source, or creating a review.
+4. Use `手动维护` on the dashboard when you want to directly update the current focus fields or append a daily log entry without opening the Markdown file.
+5. Open a section such as `routes`, `plans`, `logs`, `reviews`, `projects`, `records`, `resources`, or `exams` from the sidebar to browse files in that directory.
+6. Select a file, edit Markdown in the editor, switch between edit, split preview, and preview modes, then click `保存`. Existing files are backed up under `.backups/study-gui/` before saving.
+7. Click `新建` to create a Markdown file in a managed section. Use the current section unless you intentionally choose another one in the dialog.
+8. Use `重命名` for file name changes and `归档` to move a file under `.trash/study-gui/`. `dashboard.md` cannot be renamed or archived.
+9. Use `全局搜索` to find text across the active data root. Use `筛选当前分类`, sorting, tags, favorites, and pinned files to keep large sections manageable.
+10. Use the attachment button in the editor to add images, PDFs, or other files. The file is copied to `attachments/YYYY/MM/` and a relative Markdown link is inserted.
+
+Typical CLI use:
+
+```powershell
+.\scripts\study.ps1 init-log
+.\scripts\study.ps1 add-log --done "Read chapter 1|Finished notes|45m|logs/2026-06-19.md" --takeaway "Summarize before coding" --next "Implement one exercise"
+.\scripts\study.ps1 leetcode --topic "Array" --title "Two Sum" --difficulty "Easy" --result "Solved" --redo "No"
+.\scripts\study.ps1 exam-review --subject "Calculus" --actual "2h" --done "Limits review" --problem "Careless algebra" --next "Redo wrong problems"
+.\scripts\study.ps1 dashboard --today "Finish the API notes" --progress "Backend route|Doing|HTTP basics|Write examples"
+```
+
+Linux/macOS use the same arguments through `sh scripts/study.sh`.
+
+The commands write to predictable files inside the active data root:
+
+| Command | What it updates |
+| --- | --- |
+| `init-log` | Creates `logs/YYYY-MM-DD.md` if it does not already exist |
+| `add-log` | Appends completed work, takeaways, problems, next steps, or notes to `logs/YYYY-MM-DD.md` |
+| `leetcode` | Appends a row to `records/leetcode.md` |
+| `exam-review` | Appends a row to `records/exam-review.md` |
+| `dashboard` | Updates focus fields and progress rows in `dashboard.md` |
+| `week-plan` | Creates or replaces `plans/YYYY-WNN.md` when `--force` is supplied |
+| `health`, `doctor`, `migrate` | Check or migrate the active workspace; add `--json` for machine-readable output |
+
+Use the GUI when you want to inspect or revise full documents. Use the CLI when you already know the small update you want to append.
+
 ## Use A Private Data Repository
 
 Create a private content repository with this structure:

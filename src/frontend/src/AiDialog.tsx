@@ -162,6 +162,7 @@ export function AiDialog({
   return (
     <DialogShell title="AI 工作流" onClose={onClose}>
       <form
+        data-testid="ai-dialog"
         className="grid gap-3"
         onSubmit={(event) => {
           event.preventDefault();
@@ -222,7 +223,7 @@ export function AiDialog({
 
         <label className="grid gap-1 text-sm text-muted">
           生成要求
-          <textarea className="min-h-24 rounded-md border border-line p-3 text-ink" value={prompt} maxLength={promptLimit} onChange={(event) => setPrompt(event.target.value)} />
+          <textarea data-testid="ai-prompt" className="min-h-24 rounded-md border border-line p-3 text-ink" value={prompt} maxLength={promptLimit} onChange={(event) => setPrompt(event.target.value)} />
         </label>
 
         <label className="flex items-center gap-2 text-sm text-muted">
@@ -294,11 +295,11 @@ export function AiDialog({
             历史
           </Button>
           <Button type="button" onClick={onClose}>关闭</Button>
-          <Button type="submit" variant="primary" disabled={!canGenerate || !prompt.trim()}>
+          <Button data-testid="ai-generate-button" type="submit" variant="primary" disabled={!canGenerate || !prompt.trim()}>
             <Sparkles className="h-4 w-4" />
             {busy ? "生成中" : "生成草案"}
           </Button>
-          <Button type="button" disabled={!result} onClick={() => applyResult().catch((error: Error) => setStatus(error.message, true))}>
+          <Button data-testid="ai-apply-button" type="button" disabled={!result} onClick={() => applyResult().catch((error: Error) => setStatus(error.message, true))}>
             <Check className="h-4 w-4" />
             采纳到编辑器
           </Button>

@@ -78,6 +78,7 @@ interface ToastMessage {
 interface ToastAction {
   label: string;
   variant?: "primary" | "danger" | "plain";
+  testId?: string;
   onClick: () => void;
 }
 
@@ -134,7 +135,11 @@ function SaveIndicator({ state }: { state: SaveState }) {
   }[state];
   const Icon = config.icon;
   return (
-    <span className={`inline-flex min-h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium ${config.className}`}>
+    <span
+      data-testid="save-state"
+      data-save-state={state}
+      className={`inline-flex min-h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium ${config.className}`}
+    >
       <Icon className={`h-3.5 w-3.5 ${state === "saving" ? "animate-spin" : ""}`} />
       {config.label}
     </span>
@@ -144,10 +149,11 @@ function SaveIndicator({ state }: { state: SaveState }) {
 function ToastStack({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismiss: (toast: ToastMessage) => void }) {
   if (!toasts.length) return null;
   return (
-    <div className="fixed right-4 top-4 z-50 grid w-[min(420px,calc(100vw-2rem))] gap-2">
+    <div data-testid="toast-stack" className="fixed right-4 top-4 z-50 grid w-[min(420px,calc(100vw-2rem))] gap-2">
       {toasts.map((toast) => (
         <div
           key={toast.id}
+          data-testid="toast-message"
           className={`grid gap-3 rounded-lg border bg-white p-3 text-sm shadow-lg ${
             toast.kind === "error" ? "border-red-200 text-red-800" : toast.kind === "success" ? "border-green-200 text-green-800" : "border-slate-200 text-ink"
           }`}
@@ -162,7 +168,7 @@ function ToastStack({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismiss: 
           {toast.actions?.length ? (
             <div className="flex flex-wrap justify-end gap-2">
               {toast.actions.map((action) => (
-                <Button key={action.label} type="button" variant={action.variant} onClick={action.onClick}>
+                <Button key={action.label} type="button" variant={action.variant} data-testid={action.testId} onClick={action.onClick}>
                   {action.label}
                 </Button>
               ))}
@@ -459,11 +465,13 @@ export function App() {
             actions: [
               {
                 label: options.cancelLabel ?? "取消",
+                testId: "toast-cancel",
                 onClick: () => settle(false)
               },
               {
                 label: options.confirmLabel ?? "确认",
                 variant: options.confirmVariant ?? "primary",
+                testId: "toast-confirm",
                 onClick: () => settle(true)
               }
             ]
@@ -504,6 +512,7 @@ export function App() {
             actions: actions.map((action) => ({
               label: action.label,
               variant: action.variant,
+              testId: `toast-action-${action.value}`,
               onClick: () => settle(action.value)
             }))
           }
@@ -1111,6 +1120,7 @@ export function App() {
             <button
               key={item.key}
               type="button"
+              data-testid={`section-${item.key}`}
               onClick={() => selectSection(item.key).catch((error: Error) => setStatus(error.message, true))}
               className={`flex min-h-10 items-center justify-between rounded-md px-3 text-left text-sm hover:bg-slate-800 ${section === item.key && view !== "search" ? "bg-slate-800" : ""}`}
             >
@@ -1197,7 +1207,7 @@ export function App() {
                 }}
               />
             </label>
-            <Button onClick={() => {
+            <Button data-testid="ai-open-button" onClick={() => {
               setAiSelection(readAiSelection(editorViewRef.current));
               setAiOpen(true);
             }}>
@@ -1279,7 +1289,7 @@ export function App() {
               <div className="grid gap-2 border-b border-line px-4 py-2">
                 <div className="flex min-h-10 items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2">
-                    <div className="min-w-0 truncate text-sm text-muted">{current?.path || "未选择文件"}</div>
+                    <div data-testid="current-file-path" className="min-w-0 truncate text-sm text-muted">{current?.path || "未选择文件"}</div>
                     <SaveIndicator state={saveState} />
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
@@ -1309,7 +1319,7 @@ export function App() {
                       <Archive className="h-4 w-4" />
                       归档
                     </Button>
-                    <Button disabled={!current} variant="primary" onClick={() => saveCurrent().catch((error: Error) => setStatus(error.message, true))}>
+                    <Button data-testid="save-button" disabled={!current} variant="primary" onClick={() => saveCurrent().catch((error: Error) => setStatus(error.message, true))}>
                       <Save className="h-4 w-4" />
                       保存
                     </Button>
@@ -1381,13 +1391,13 @@ export function App() {
                       <Download className="h-4 w-4" />
                     </IconButton>
                     <div className="inline-flex gap-1 rounded-md border border-line bg-slate-50 p-1">
-                      <IconButton type="button" disabled={!current} active={editorMode === "edit"} title="编辑" onClick={() => setMode("edit")}>
+                      <IconButton data-testid="editor-mode-edit" type="button" disabled={!current} active={editorMode === "edit"} title="编辑" onClick={() => setMode("edit")}>
                         <PencilLine className="h-4 w-4" />
                       </IconButton>
-                      <IconButton type="button" disabled={!current} active={editorMode === "split"} title="分屏预览" onClick={() => setMode("split")}>
+                      <IconButton data-testid="editor-mode-split" type="button" disabled={!current} active={editorMode === "split"} title="分屏预览" onClick={() => setMode("split")}>
                         <Columns2 className="h-4 w-4" />
                       </IconButton>
-                      <IconButton type="button" disabled={!current} active={editorMode === "preview"} title="预览" onClick={() => setMode("preview")}>
+                      <IconButton data-testid="editor-mode-preview" type="button" disabled={!current} active={editorMode === "preview"} title="预览" onClick={() => setMode("preview")}>
                         <Eye className="h-4 w-4" />
                       </IconButton>
                     </div>
@@ -1407,6 +1417,7 @@ export function App() {
                 {editorMode !== "preview" ? (
                   <div className="h-full min-h-0 overflow-hidden">
                     <CodeMirror
+                      data-testid="editor"
                       value={content}
                       height="100%"
                       minHeight="100%"
@@ -1436,6 +1447,7 @@ export function App() {
                   <div className={`relative h-full min-h-0 ${editorMode === "split" ? "border-l border-line max-[920px]:border-l-0 max-[920px]:border-t" : ""}`}>
                     <article
                       ref={previewRef}
+                      data-testid="markdown-preview"
                       className="markdown-preview h-full overflow-auto p-6"
                       onScroll={(event) => {
                         handlePreviewScroll(event.currentTarget);
@@ -1980,6 +1992,7 @@ function FileTree({
                 <button
                   key={file.path}
                   type="button"
+                  data-testid={`file-item-${file.path}`}
                   onClick={() => onOpen(file.path).catch((error: Error) => setStatus(error.message, true))}
                   className={`min-h-[76px] rounded-md border bg-white p-3 text-left hover:border-brand hover:shadow-[0_0_0_3px_rgba(15,118,110,.18)] ${
                     current?.path === file.path ? "border-brand shadow-[0_0_0_3px_rgba(15,118,110,.18)]" : "border-line"

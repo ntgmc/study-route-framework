@@ -135,6 +135,7 @@ describe("markdown store", () => {
   it("slugifies filenames", () => {
     expect(slugifyFilename("My Plan")).toBe("My-Plan.md");
     expect(slugifyFilename("bad<>name.md")).toBe("badname.md");
+    expect(slugifyFilename("nested\\path\\My File.md")).toBe("My-File.md");
     expect(() => slugifyFilename("")).toThrow("文件名不能为空");
   });
 

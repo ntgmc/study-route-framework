@@ -645,6 +645,7 @@ describe("api", () => {
 
     await request(app).get(`/${uploaded.body.path}`).expect(200);
     await request(app).get("/attachments/..%2fdashboard.md").expect(400);
+    await request(app).get("/attachments/2026/%2e%2e/dashboard.md").expect(404);
   });
 
   it("rejects attachments larger than 25 MB", async () => {

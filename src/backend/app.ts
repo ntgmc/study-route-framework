@@ -65,8 +65,32 @@ function stringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined;
 }
 
+function createRateLimiter(options: { windowMs: number; max: number }): express.RequestHandler {
+  const buckets = new Map<string, { resetAt: number; count: number }>();
+  return (request, response, next) => {
+    const now = Date.now();
+    const key = `${request.ip ?? request.socket.remoteAddress ?? "local"}:${request.method}:${request.path}`;
+    const current = buckets.get(key);
+    const bucket = current && current.resetAt > now ? current : { resetAt: now + options.windowMs, count: 0 };
+    bucket.count += 1;
+    buckets.set(key, bucket);
+    if (bucket.count > options.max) {
+      response.setHeader("Retry-After", String(Math.ceil((bucket.resetAt - now) / 1000)));
+      sendError(response, 429, "请求过于频繁，请稍后再试");
+      return;
+    }
+    if (buckets.size > 10000) {
+      for (const [bucketKey, value] of buckets) {
+        if (value.resetAt <= now) buckets.delete(bucketKey);
+      }
+    }
+    next();
+  };
+}
+
 export function createApp() {
   const app = express();
+  app.use("/api", createRateLimiter({ windowMs: 60_000, max: 600 }));
   app.use(express.json({ limit: "2mb" }));
 
   app.get("/api/summary", (_request, response) => response.json(versioned(repoSummary() as unknown as Record<string, unknown>)));

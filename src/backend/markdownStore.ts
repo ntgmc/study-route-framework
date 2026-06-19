@@ -35,10 +35,12 @@ function config() {
 }
 
 export function readText(filePath: string): string {
+  assertReadablePath(filePath);
   return fs.readFileSync(filePath, "utf8");
 }
 
 export function writeText(filePath: string, text: string): void {
+  assertWritablePath(filePath);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, text.replace(/\r?\n/g, "\n"), "utf8");
 }
@@ -66,13 +68,58 @@ function displayPath(target: string): string {
 }
 
 function pathParts(rel: string): string[] {
-  return rel.split(/[\\/]+/).filter(Boolean);
+  return rel.replaceAll("\\", "/").split("/").filter(Boolean);
+}
+
+function hasUnsafePathChar(value: string): boolean {
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code < 32 || code === 127 || "<>:\"|?*".includes(char)) return true;
+  }
+  return false;
+}
+
+function safeRelativeParts(value: string): string[] {
+  const clean = value.trim();
+  if (!clean || clean.length > 512 || path.isAbsolute(clean)) throw new Error("Invalid path");
+  const parts = clean.replaceAll("\\", "/").split("/");
+  const result: string[] = [];
+  for (const part of parts) {
+    if (!part || part === "." || part === ".." || part.length > 120 || hasUnsafePathChar(part)) throw new Error("Invalid path");
+    result.push(part);
+  }
+  return result;
+}
+
+function filenameLeaf(value: string): string {
+  return value.trim().replaceAll("\\", "/").split("/").filter(Boolean).pop() ?? "";
+}
+
+function sanitizeFilename(value: string): string {
+  let output = "";
+  let pendingDash = false;
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code < 32 || code === 127 || "<>:\"|?*".includes(char)) continue;
+    if (char.trim() === "") {
+      pendingDash = output.length > 0;
+      continue;
+    }
+    if (pendingDash && output && !output.endsWith("-")) output += "-";
+    output += char;
+    pendingDash = false;
+  }
+  while (output.startsWith(".") || output.startsWith(" ")) output = output.slice(1);
+  while (output.endsWith(".") || output.endsWith(" ")) output = output.slice(0, -1);
+  return output;
+}
+
+function joinSafe(root: string, parts: string[]): string {
+  return path.join(root, ...parts);
 }
 
 export function slugifyFilename(value: string): string {
-  let name = value.trim().replace(/\\/g, "/").split("/").pop() ?? "";
-  name = name.replace(/\s+/g, "-");
-  name = name.replace(/[<>:"|?*\x00-\x1f]/g, "").replace(/^[. ]+|[. ]+$/g, "");
+  let name = sanitizeFilename(filenameLeaf(value));
   if (!name) throw new Error("文件名不能为空");
   if (!name.endsWith(".md")) name += ".md";
   return name;
@@ -106,9 +153,17 @@ function isReadableManagedPath(target: string): boolean {
   return isManagedPath(target) || isFrameworkTemplatePath(target);
 }
 
+function assertReadablePath(target: string): void {
+  if (!isReadableManagedPath(target)) throw new Error("Path is outside readable scope");
+}
+
+function assertWritablePath(target: string): void {
+  if (!isManagedPath(target)) throw new Error("Path is outside writable scope");
+}
+
 export function resolveManaged(value: string): string {
   if (!value) throw new Error("缺少文件路径");
-  const target = path.resolve(config().dataRoot, value);
+  const target = joinSafe(config().dataRoot, safeRelativeParts(value));
   if (!isManagedPath(target)) throw new Error("路径不在可管理范围内");
   return target;
 }
@@ -460,8 +515,13 @@ function collectPendingReviews(plans: FileMeta[]): ExecutionReviewItem[] {
   return plans.slice(0, 6).map((plan) => {
     const text = readText(resolveManaged(plan.path));
     const reviewPath = reviewPathForPlan(plan.path, text);
-    const reviewFile = path.resolve(config().dataRoot, reviewPath);
-    if (!fs.existsSync(reviewFile)) {
+    let reviewFile = "";
+    try {
+      reviewFile = resolveManaged(reviewPath);
+    } catch {
+      reviewFile = "";
+    }
+    if (!reviewFile || !fs.existsSync(reviewFile)) {
       return {
         id: `${plan.path}:review`,
         plan,
@@ -590,6 +650,7 @@ export function extractExcerpt(text: string): string {
 }
 
 export function fileMeta(filePath: string): FileMeta {
+  assertReadablePath(filePath);
   const stat = fs.statSync(filePath);
   let text = "";
   try {
@@ -648,16 +709,17 @@ export function listMarkdownFiles(section: string, query = "", sort: SortMode = 
 export function getFile(pathValue: string): FileDocument {
   let filePath = resolveManaged(pathValue);
   if (!fs.existsSync(filePath) && pathParts(pathValue)[0] === "templates") {
-    const fallback = path.resolve(config().frameworkRoot, pathValue);
+    const fallback = joinSafe(config().frameworkRoot, safeRelativeParts(pathValue));
     if (isFrameworkTemplatePath(fallback) && fs.existsSync(fallback)) filePath = fallback;
   }
   return { meta: fileMeta(filePath), content: readText(filePath) };
 }
 
 export function backupFile(filePath: string): string {
+  assertWritablePath(filePath);
   if (!fs.existsSync(filePath)) throw new Error("文件不存在");
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
-  const backup = path.join(config().dataRoot, ".backups", "study-gui", stamp, relativePath(filePath));
+  const backup = joinSafe(config().dataRoot, [".backups", "study-gui", stamp, ...pathParts(relativePath(filePath))]);
   fs.mkdirSync(path.dirname(backup), { recursive: true });
   fs.copyFileSync(filePath, backup);
   return backup;
@@ -701,7 +763,7 @@ export function updateFileFrontMatter(pathValue: string, patch: Partial<Pick<Doc
 export function createFile(section: string, title: string, name: string) {
   if (section === "dashboard") throw new Error("总览不能创建子文件");
   const filename = slugifyFilename(name || title);
-  const filePath = path.resolve(dataSectionRoot(section), filename);
+  const filePath = joinSafe(dataSectionRoot(section), [filename]);
   if (!isManagedPath(filePath)) throw new Error("文件路径无效");
   if (fs.existsSync(filePath)) throw new Error("文件已存在");
   const rel = relativePath(filePath);
@@ -713,7 +775,7 @@ export function createFile(section: string, title: string, name: string) {
 export function renameFile(pathValue: string, newName: string) {
   const source = resolveManaged(pathValue);
   if (path.basename(source) === "dashboard.md") throw new Error("dashboard.md 不能重命名");
-  const target = path.resolve(path.dirname(source), slugifyFilename(newName));
+  const target = joinSafe(path.dirname(source), [slugifyFilename(newName)]);
   if (!isManagedPath(target)) throw new Error("目标路径无效");
   if (fs.existsSync(target)) throw new Error("目标文件已存在");
   fs.renameSync(source, target);
@@ -724,7 +786,7 @@ export function archiveFile(pathValue: string) {
   const source = resolveManaged(pathValue);
   if (path.basename(source) === "dashboard.md") throw new Error("dashboard.md 不能归档");
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
-  const target = path.join(config().dataRoot, ".trash", "study-gui", stamp, relativePath(source));
+  const target = joinSafe(config().dataRoot, [".trash", "study-gui", stamp, ...pathParts(relativePath(source))]);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.renameSync(source, target);
   return { ok: true as const, archived_to: relativePath(target) };
@@ -875,7 +937,7 @@ export function ensureLog(date: string): string {
 }
 
 export function appendDailyLog(payload: Record<string, string>) {
-  const date = payload.date || new Date().toISOString().slice(0, 10);
+  const date = normalizeDate(payload.date);
   const filePath = ensureLog(date);
   const backup = backupFile(filePath);
   let text = readText(filePath);

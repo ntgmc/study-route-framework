@@ -24,17 +24,40 @@ export function sectionToDocumentType(section: SectionKey): DocumentType {
 
 export function sectionFromRelativePath(relPath: string): SectionKey | "unknown" {
   if (relPath === "dashboard.md") return "dashboard";
-  const first = relPath.split(/[\\/]+/).filter(Boolean)[0];
+  const first = pathParts(relPath)[0];
   const section = sections.find((item) => item.path === first)?.key;
   return section && isSectionKey(section) ? section : "unknown";
 }
 
+function pathParts(relPath: string): string[] {
+  return relPath.replaceAll("\\", "/").split("/").filter(Boolean);
+}
+
+function stripMarkdownExtension(value: string): string {
+  return value.toLocaleLowerCase().endsWith(".md") ? value.slice(0, -3) : value;
+}
+
+function slugPart(value: string): string {
+  let output = "";
+  let pendingDash = false;
+  for (const char of value.toLocaleLowerCase()) {
+    const isDigit = char >= "0" && char <= "9";
+    const isLetter = char >= "a" && char <= "z";
+    if (isDigit || isLetter) {
+      if (pendingDash && output) output += "-";
+      output += char;
+      pendingDash = false;
+    } else if (output) {
+      pendingDash = true;
+    }
+  }
+  return output;
+}
+
 export function slugForPath(relPath: string): string {
-  const noExt = relPath.replace(/\\/g, "/").replace(/\.md$/i, "");
-  return noExt
-    .split("/")
-    .filter((part) => part && part !== ".")
-    .map((part) => part.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""))
+  return pathParts(stripMarkdownExtension(relPath))
+    .filter((part) => part !== ".")
+    .map(slugPart)
     .filter(Boolean)
     .join("-");
 }
@@ -44,13 +67,56 @@ function today(): string {
 }
 
 function inferWeek(relPath: string, title: string): string | undefined {
-  const match = `${relPath} ${title}`.match(/\b\d{4}-W\d{2}\b/);
-  return match?.[0];
+  return scanToken(`${relPath} ${title}`, "week");
 }
 
 function inferDate(relPath: string, title: string): string | undefined {
-  const match = `${relPath} ${title}`.match(/\b\d{4}-\d{2}-\d{2}\b/);
-  return match?.[0];
+  return scanToken(`${relPath} ${title}`, "date");
+}
+
+function isDigitAt(value: string, index: number): boolean {
+  const char = value[index];
+  return char >= "0" && char <= "9";
+}
+
+function isBoundary(value: string, index: number): boolean {
+  if (index < 0 || index >= value.length) return true;
+  const char = value[index].toLocaleLowerCase();
+  return !((char >= "a" && char <= "z") || (char >= "0" && char <= "9"));
+}
+
+function scanToken(value: string, kind: "week" | "date"): string | undefined {
+  const source = value.slice(0, 512);
+  const length = kind === "week" ? 8 : 10;
+  for (let index = 0; index <= source.length - length; index += 1) {
+    const candidate = source.slice(index, index + length);
+    const matchesWeek =
+      kind === "week" &&
+      isDigitAt(candidate, 0) &&
+      isDigitAt(candidate, 1) &&
+      isDigitAt(candidate, 2) &&
+      isDigitAt(candidate, 3) &&
+      candidate[4] === "-" &&
+      candidate[5] === "W" &&
+      isDigitAt(candidate, 6) &&
+      isDigitAt(candidate, 7);
+    const matchesDate =
+      kind === "date" &&
+      isDigitAt(candidate, 0) &&
+      isDigitAt(candidate, 1) &&
+      isDigitAt(candidate, 2) &&
+      isDigitAt(candidate, 3) &&
+      candidate[4] === "-" &&
+      isDigitAt(candidate, 5) &&
+      isDigitAt(candidate, 6) &&
+      candidate[7] === "-" &&
+      isDigitAt(candidate, 8) &&
+      isDigitAt(candidate, 9);
+    if ((matchesWeek || matchesDate) && isBoundary(source, index - 1) && isBoundary(source, index + length)) {
+      return candidate;
+    }
+  }
+  return undefined;
 }
 
 export function recommendedFrontMatter(relPath: string, title: string, existing: DocumentFrontMatter = {}): DocumentFrontMatter {
@@ -58,7 +124,7 @@ export function recommendedFrontMatter(relPath: string, title: string, existing:
   const type = section === "unknown" ? "template" : sectionToDocumentType(section);
   const slugSource = section === "dashboard" || section === "unknown"
     ? relPath
-    : relPath.replace(/^[^\\/]+[\\/]/, "");
+    : pathParts(relPath).slice(1).join("/");
   const date = today();
   const base: DocumentFrontMatter = {
     id: `${type}:${slugForPath(slugSource) || path.basename(relPath, ".md").toLocaleLowerCase() || "document"}`,

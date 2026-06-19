@@ -35,6 +35,10 @@ That means a fresh public clone can run immediately with demo data, while person
 
 The Web GUI shows the active data mode, data root, and framework root in the sidebar so you can confirm where files are written before editing.
 
+Workspace AI settings are stored per data root in `.study-route/ai-config.json`. This file only stores non-secret fields such as provider, base URL, model, timeout, token limit, temperature, and enabled/disabled state. API keys still come only from environment variables.
+
+Uploaded images, PDFs, and other attachments are copied into the active data root under `attachments/YYYY/MM/`. Markdown inserted by the editor points to that relative path, so files stay with the same learning workspace.
+
 ## Quick Start With Demo Data
 
 From the framework repository:
@@ -219,6 +223,8 @@ To fully disable AI while keeping the editor usable:
 $env:LLM_DISABLED="1"
 .\scripts\study-gui.ps1
 ```
+
+You can also open the AI Provider settings from the Web GUI sidebar. Settings saved there apply only to the current `STUDY_ROUTE_DATA_DIR` and do not store API keys.
 
 Global `LLM_*` variables override provider-specific variables:
 

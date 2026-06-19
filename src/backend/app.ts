@@ -18,7 +18,8 @@ import {
   searchFiles,
   updateDashboardFocus
 } from "./markdownStore.js";
-import { aiStatus, generateMarkdown, LlmConfigError, LlmRequestError } from "./llm.js";
+import { MAX_ATTACHMENT_BYTES, saveAttachment, sendAttachmentPath } from "./attachments.js";
+import { aiSettings, aiStatus, generateMarkdown, LlmConfigError, LlmRequestError, saveAiSettings } from "./llm.js";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,9 +59,13 @@ export function createApp() {
   app.get("/api/file", (request, response) => response.json(getFile(asString(request.query.path))));
   app.get("/api/search", (request, response) => response.json({ results: searchFiles(asString(request.query.q)) }));
   app.get("/api/ai/status", (_request, response) => response.json(aiStatus()));
+  app.get("/api/ai/settings", (_request, response) => response.json(aiSettings()));
 
   app.post("/api/file", (request, response) => {
     response.json(saveFile(asString(request.body?.path), asString(request.body?.content)));
+  });
+  app.put("/api/ai/settings", (request, response) => {
+    response.json(saveAiSettings(request.body));
   });
   app.post("/api/create", (request, response) => {
     response.status(201).json(createFile(asString(request.body?.section), asString(request.body?.title), asString(request.body?.name)));
@@ -96,6 +101,31 @@ export function createApp() {
       next(error);
     }
   });
+  app.post("/api/attachments", express.raw({ type: "application/octet-stream", limit: MAX_ATTACHMENT_BYTES }), (request, response) => {
+    if (!Buffer.isBuffer(request.body)) throw new Error("附件请求体必须是 application/octet-stream");
+    response.status(201).json(saveAttachment(asString(request.header("X-File-Name")) || asString(request.query.name) || "attachment", request.body, asString(request.header("X-File-Mime")) || asString(request.header("Content-Type")) || "application/octet-stream"));
+  });
+  app.use((request, response, next) => {
+    const rawPath = request.originalUrl.split("?")[0];
+    if (request.method !== "GET" || !rawPath.toLowerCase().startsWith("/attachments/")) {
+      next();
+      return;
+    }
+    const attachmentPath = decodeURIComponent(rawPath.slice("/attachments/".length));
+    sendAttachmentPath(attachmentPath, response);
+  });
+  app.use("/attachments", (request, response, next) => {
+    if (request.method !== "GET") {
+      next();
+      return;
+    }
+    const attachmentPath = decodeURIComponent(request.path.replace(/^\/+/, ""));
+    if (!attachmentPath) {
+      response.status(404).json({ error: "附件不存在" });
+      return;
+    }
+    sendAttachmentPath(attachmentPath, response);
+  });
 
   const publicDir = resolvePublicDir();
   app.use(express.static(publicDir));
@@ -116,7 +146,12 @@ export function createApp() {
       sendError(response, 502, error.message);
       return;
     }
-    sendError(response, 400, error instanceof Error ? error.message : "请求失败");
+    const status = typeof (error as { status?: unknown }).status === "number"
+      ? (error as { status: number }).status
+      : typeof (error as { statusCode?: unknown }).statusCode === "number"
+        ? (error as { statusCode: number }).statusCode
+        : 400;
+    sendError(response, status, error instanceof Error ? error.message : "请求失败");
   });
 
   return app;

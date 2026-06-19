@@ -23,12 +23,14 @@ import {
   Link,
   List,
   Loader2,
+  Paperclip,
   PencilLine,
   Pin,
   Quote,
   Redo2,
   Save,
   Search,
+  Settings,
   Star,
   Table2,
   Tags,
@@ -86,6 +88,7 @@ interface MetadataExportPayload {
 }
 
 const LazyAiDialog = lazy(() => import("./AiDialog"));
+const LazyAiSettingsDialog = lazy(() => import("./AiSettingsDialog"));
 
 const markdownSnippetCompletion = autocompletion({
   override: [
@@ -321,6 +324,18 @@ function insertMarkdown(view: EditorView, action: MarkdownAction) {
   }
 }
 
+function insertEditorText(view: EditorView, text: string) {
+  const selection = view.state.selection.main;
+  const prefix = selection.from > 0 && !view.state.doc.sliceString(selection.from - 1, selection.from).match(/\s/) ? "\n\n" : "";
+  const suffix = text.endsWith("\n") ? "" : "\n";
+  view.dispatch({
+    changes: { from: selection.from, to: selection.to, insert: `${prefix}${text}${suffix}` },
+    selection: { anchor: selection.from + prefix.length + text.length + suffix.length },
+    scrollIntoView: true
+  });
+  view.focus();
+}
+
 function MarkdownToolbar({ disabled, onAction }: { disabled: boolean; onAction: (action: MarkdownAction) => void }) {
   const items: Array<{ action: MarkdownAction; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { action: "bold", label: "加粗 Ctrl+B", icon: Bold },
@@ -366,6 +381,7 @@ export function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode>("edit");
   const [draftVersions, setDraftVersions] = useState<DraftVersionRecord[]>([]);
   const [compareVersion, setCompareVersion] = useState<DraftVersionRecord | null>(null);
@@ -387,6 +403,7 @@ export function App() {
   const showPreviewTopRef = useRef(false);
   const toastIdRef = useRef(1);
   const metadataInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const [showPreviewTop, setShowPreviewTop] = useState(false);
 
   const showToast = useCallback((message: string, kind: ToastKind = "info") => {
@@ -918,6 +935,13 @@ export function App() {
     reportStatus(`已导入 ${records.length} 条本地标记`, false);
   }
 
+  async function uploadAttachment(file: File) {
+    if (!current || !editorViewRef.current) return;
+    const result = await client.uploadAttachment(file);
+    insertEditorText(editorViewRef.current, result.markdown);
+    reportStatus(`附件已保存到 ${result.path}`, false);
+  }
+
   async function saveCurrent() {
     if (!current) return;
     setSaveState("saving");
@@ -1010,9 +1034,14 @@ export function App() {
         </nav>
         {summary ? (
           <section className="mt-4 rounded-md border border-white/10 bg-white/5 p-3 text-xs">
-            <div className="mb-2 flex items-center gap-2 font-medium text-slate-100">
-              <Folder className="h-4 w-4" />
-              当前数据目录
+            <div className="mb-2 flex items-center justify-between gap-2 font-medium text-slate-100">
+              <span className="flex items-center gap-2">
+                <Folder className="h-4 w-4" />
+                当前数据目录
+              </span>
+              <button type="button" className="grid h-7 w-7 place-items-center rounded-md bg-white/10 hover:bg-white/15" title="AI 配置" onClick={() => setAiSettingsOpen(true)}>
+                <Settings className="h-4 w-4" />
+              </button>
             </div>
             <div className="grid gap-2 text-slate-300">
               <div>
@@ -1183,7 +1212,23 @@ export function App() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <MarkdownToolbar disabled={!current || editorMode === "preview"} onAction={applyMarkdownAction} />
+                  <div className="flex flex-wrap items-center gap-1">
+                    <MarkdownToolbar disabled={!current || editorMode === "preview"} onAction={applyMarkdownAction} />
+                    <IconButton type="button" disabled={!current || editorMode === "preview"} title="上传附件" onClick={() => attachmentInputRef.current?.click()}>
+                      <Paperclip className="h-4 w-4" />
+                    </IconButton>
+                    <input
+                      ref={attachmentInputRef}
+                      className="hidden"
+                      type="file"
+                      accept="image/*,.pdf,application/pdf,*/*"
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        if (file) uploadAttachment(file).catch((error: Error) => setStatus(error.message, true));
+                      }}
+                    />
+                  </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <label className="relative">
                       <Tags className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted" />
@@ -1334,7 +1379,7 @@ export function App() {
       }} /> : null}
       {aiOpen ? (
         <Suspense fallback={<DialogShell title="AI 生成" onClose={() => setAiOpen(false)}><div className="p-6 text-sm text-muted">加载中</div></DialogShell>}>
-          <LazyAiDialog section={section} current={current} content={content} onClose={() => setAiOpen(false)} onConfirmReplace={() => requestConfirmation("确定用 AI 生成结果替换当前编辑器内容吗？", {
+          <LazyAiDialog section={section} current={current} content={content} onClose={() => setAiOpen(false)} onOpenSettings={() => setAiSettingsOpen(true)} onConfirmReplace={() => requestConfirmation("确定用 AI 生成结果替换当前编辑器内容吗？", {
             confirmLabel: "替换",
             cancelLabel: "取消",
             confirmVariant: "danger"
@@ -1344,6 +1389,11 @@ export function App() {
             setSaveState("dirty");
             setStatus("AI 生成内容已写入编辑器，保存后才会更新文件");
           }} />
+        </Suspense>
+      ) : null}
+      {aiSettingsOpen ? (
+        <Suspense fallback={<DialogShell title="AI Provider 配置" onClose={() => setAiSettingsOpen(false)}><div className="p-6 text-sm text-muted">加载中</div></DialogShell>}>
+          <LazyAiSettingsDialog onClose={() => setAiSettingsOpen(false)} />
         </Suspense>
       ) : null}
       {compareVersion ? (

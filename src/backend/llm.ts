@@ -1,4 +1,13 @@
-import type { AiGenerateResponse, AiStatusResponse } from "../../types/api.js";
+import type {
+  AiGenerateResponse,
+  AiProviderId,
+  AiProviderOption,
+  AiSettingsResponse,
+  AiStatusResponse,
+  AiWorkspaceSettings,
+  SaveAiSettingsResponse
+} from "../../types/api.js";
+import { readAiSettings, saveAiSettings as persistAiSettings, type StoredAiSettings } from "./aiSettingsStore.js";
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_MODEL = "deepseek-v4-flash";
@@ -11,7 +20,7 @@ export const MAX_CONTEXT_CHARS = 12000;
 export class LlmConfigError extends Error {}
 export class LlmRequestError extends Error {}
 
-type LlmProviderId = "deepseek" | "openai" | "openrouter" | "siliconflow" | "custom" | "ollama" | "lmstudio";
+type LlmProviderId = AiProviderId;
 
 interface ProviderProfile {
   id: LlmProviderId;
@@ -40,6 +49,11 @@ interface LlmConfig {
   requiredEnv: string;
   disabledReason?: string;
   localProvider: boolean;
+  settings: AiWorkspaceSettings;
+  configSource: "environment" | "workspace" | "default" | "disabled";
+  envOverrides: string[];
+  requiredKeyEnv: string;
+  apiKeyDetected: boolean;
   extraBody?: Record<string, unknown>;
 }
 
@@ -124,6 +138,20 @@ const PROVIDERS: Record<LlmProviderId, ProviderProfile> = {
   }
 };
 
+function providerOptions(): AiProviderOption[] {
+  return Object.values(PROVIDERS).map((profile) => ({
+    id: profile.id,
+    label: profile.label,
+    local_provider: profile.localProvider,
+    api_key_required: profile.apiKeyRequired,
+    api_key_env: profile.apiKeyEnv,
+    base_url_env: profile.baseUrlEnv,
+    model_env: profile.modelEnv,
+    default_base_url: profile.defaultBaseUrl,
+    default_model: profile.defaultModel
+  }));
+}
+
 function parseIntEnv(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
@@ -157,9 +185,10 @@ function disabledReason(): string | undefined {
   return undefined;
 }
 
-function inferProvider(): LlmProviderId {
+function inferProvider(workspace: StoredAiSettings): LlmProviderId {
   return (
     normalizeProvider(process.env.LLM_PROVIDER) ??
+    workspace.provider ??
     (process.env.LLM_API_KEY ? "custom" : undefined) ??
     (process.env.OPENAI_API_KEY ? "openai" : undefined) ??
     (process.env.OPENROUTER_API_KEY ? "openrouter" : undefined) ??
@@ -174,7 +203,51 @@ function cleanBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
 }
 
+function envValue(...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = (process.env[key] ?? "").trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function prefixedEnv(profile: ProviderProfile, suffix: "TIMEOUT" | "MAX_TOKENS" | "TEMPERATURE"): string {
+  return `${profile.apiKeyEnv.replace(/_API_KEY$/, "")}_${suffix}`;
+}
+
+function requiredKeyEnv(providerId: LlmProviderId, profile: ProviderProfile): string {
+  if (!profile.apiKeyRequired) return profile.apiKeyEnv;
+  return providerId === "custom" ? "LLM_API_KEY" : `${profile.apiKeyEnv} 或 LLM_API_KEY`;
+}
+
+function envOverrides(profile: ProviderProfile): string[] {
+  const overrides: string[] = [];
+  if (envValue("LLM_PROVIDER")) overrides.push("provider");
+  if (envValue("LLM_API_KEY", profile.apiKeyEnv)) overrides.push("apiKey");
+  if (envValue("LLM_BASE_URL", profile.baseUrlEnv)) overrides.push("baseUrl");
+  if (envValue("LLM_MODEL", profile.modelEnv)) overrides.push("model");
+  if (envValue("LLM_TIMEOUT", prefixedEnv(profile, "TIMEOUT"))) overrides.push("timeout");
+  if (envValue("LLM_MAX_TOKENS", prefixedEnv(profile, "MAX_TOKENS"))) overrides.push("maxTokens");
+  if (envValue("LLM_TEMPERATURE", prefixedEnv(profile, "TEMPERATURE"))) overrides.push("temperature");
+  return overrides;
+}
+
 function envConfig(): LlmConfig {
+  const workspace = readAiSettings();
+  const providerId = inferProvider(workspace);
+  const profile = PROVIDERS[providerId];
+  const overrides = envOverrides(profile);
+  const apiKey = envValue("LLM_API_KEY", profile.apiKeyEnv) ?? "";
+  const requiredEnv = requiredKeyEnv(providerId, profile);
+  const settings: AiWorkspaceSettings = {
+    enabled: workspace.enabled ?? true,
+    provider: providerId,
+    baseUrl: cleanBaseUrl(envValue("LLM_BASE_URL", profile.baseUrlEnv) ?? workspace.baseUrl ?? profile.defaultBaseUrl),
+    model: (envValue("LLM_MODEL", profile.modelEnv) ?? workspace.model ?? profile.defaultModel).trim(),
+    timeout: parseIntEnv(envValue("LLM_TIMEOUT", prefixedEnv(profile, "TIMEOUT")) ?? (workspace.timeout === undefined ? undefined : String(workspace.timeout)), DEFAULT_TIMEOUT),
+    maxTokens: parseIntEnv(envValue("LLM_MAX_TOKENS", prefixedEnv(profile, "MAX_TOKENS")) ?? (workspace.maxTokens === undefined ? undefined : String(workspace.maxTokens)), DEFAULT_MAX_TOKENS),
+    temperature: parseFloatEnv(envValue("LLM_TEMPERATURE", prefixedEnv(profile, "TEMPERATURE")) ?? (workspace.temperature === undefined ? undefined : String(workspace.temperature)), DEFAULT_TEMPERATURE)
+  };
   const disabled = disabledReason();
   if (disabled) {
     return {
@@ -190,35 +263,56 @@ function envConfig(): LlmConfig {
       temperature: DEFAULT_TEMPERATURE,
       requiredEnv: "移除 LLM_DISABLED 或 LLM_PROVIDER=disabled/off/none",
       disabledReason: disabled,
-      localProvider: false
+      localProvider: false,
+      settings: { ...settings, enabled: false },
+      configSource: "disabled",
+      envOverrides: ["enabled", ...overrides],
+      requiredKeyEnv: requiredEnv,
+      apiKeyDetected: Boolean(apiKey)
     };
   }
-  const providerId = inferProvider();
-  const profile = PROVIDERS[providerId];
-  const apiKey = (process.env.LLM_API_KEY ?? process.env[profile.apiKeyEnv] ?? "").trim();
-  const baseUrl = cleanBaseUrl(process.env.LLM_BASE_URL ?? process.env[profile.baseUrlEnv] ?? profile.defaultBaseUrl);
-  const model = (process.env.LLM_MODEL ?? process.env[profile.modelEnv] ?? profile.defaultModel).trim();
-  const configured = Boolean((apiKey || !profile.apiKeyRequired) && baseUrl && model);
-  const timeout = parseIntEnv(process.env.LLM_TIMEOUT ?? process.env[`${profile.apiKeyEnv.replace(/_API_KEY$/, "")}_TIMEOUT`], DEFAULT_TIMEOUT);
-  const maxTokens = parseIntEnv(process.env.LLM_MAX_TOKENS ?? process.env[`${profile.apiKeyEnv.replace(/_API_KEY$/, "")}_MAX_TOKENS`], DEFAULT_MAX_TOKENS);
-  const temperature = parseFloatEnv(process.env.LLM_TEMPERATURE ?? process.env[`${profile.apiKeyEnv.replace(/_API_KEY$/, "")}_TEMPERATURE`], DEFAULT_TEMPERATURE);
+  if (!settings.enabled) {
+    return {
+      enabled: false,
+      configured: false,
+      providerId: "disabled",
+      provider: "AI Disabled",
+      apiKey,
+      baseUrl: settings.baseUrl,
+      model: settings.model,
+      timeout: settings.timeout,
+      maxTokens: settings.maxTokens,
+      temperature: settings.temperature,
+      requiredEnv: "在 AI 设置中启用",
+      disabledReason: "当前数据目录 AI 设置已关闭",
+      localProvider: profile.localProvider,
+      settings,
+      configSource: Object.keys(workspace).length ? "workspace" : "default",
+      envOverrides: overrides,
+      requiredKeyEnv: requiredEnv,
+      apiKeyDetected: Boolean(apiKey),
+      extraBody: profile.extraBody
+    };
+  }
+  const configured = Boolean((apiKey || !profile.apiKeyRequired) && settings.baseUrl && settings.model);
   return {
     enabled: true,
     configured,
     providerId,
     provider: profile.label,
     apiKey,
-    baseUrl,
-    model,
-    timeout,
-    maxTokens,
-    temperature,
-    requiredEnv: providerId === "custom"
-      ? "LLM_API_KEY + LLM_BASE_URL + LLM_MODEL"
-      : profile.apiKeyRequired
-        ? `${profile.apiKeyEnv} 或 LLM_API_KEY`
-        : `${profile.modelEnv} 或 LLM_MODEL`,
+    baseUrl: settings.baseUrl,
+    model: settings.model,
+    timeout: settings.timeout,
+    maxTokens: settings.maxTokens,
+    temperature: settings.temperature,
+    requiredEnv: profile.apiKeyRequired ? requiredEnv : `${profile.modelEnv} 或 LLM_MODEL`,
     localProvider: profile.localProvider,
+    settings,
+    configSource: overrides.length ? "environment" : Object.keys(workspace).length ? "workspace" : "default",
+    envOverrides: overrides,
+    requiredKeyEnv: requiredEnv,
+    apiKeyDetected: Boolean(apiKey),
     extraBody: profile.extraBody
   };
 }
@@ -237,12 +331,35 @@ export function aiStatus(): AiStatusResponse {
     required_env: cfg.requiredEnv,
     disabled_reason: cfg.disabledReason,
     local_provider: cfg.localProvider,
+    settings: cfg.settings,
+    config_source: cfg.configSource,
+    env_overrides: cfg.envOverrides,
+    required_key_env: cfg.requiredKeyEnv,
+    api_key_detected: cfg.apiKeyDetected,
     context_limits: {
       prompt_chars: MAX_PROMPT_CHARS,
       context_chars: MAX_CONTEXT_CHARS
     },
     sends_context_fields: ["mode", "prompt", "section", "path", "context"]
   };
+}
+
+export function aiSettings(): AiSettingsResponse {
+  const cfg = envConfig();
+  return {
+    settings: cfg.settings,
+    saved_settings: readAiSettings(),
+    providers: providerOptions(),
+    config_source: cfg.configSource,
+    env_overrides: cfg.envOverrides,
+    required_key_env: cfg.requiredKeyEnv,
+    api_key_detected: cfg.apiKeyDetected
+  };
+}
+
+export function saveAiSettings(payload: unknown): SaveAiSettingsResponse {
+  persistAiSettings(payload);
+  return { ok: true, ...aiSettings() };
 }
 
 function clampText(value: string, maxChars: number): string {

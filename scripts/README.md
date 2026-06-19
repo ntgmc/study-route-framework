@@ -142,6 +142,8 @@ http://127.0.0.1:5173
 
 The GUI does not store API keys in the framework, data root, or browser storage. Set provider variables in the terminal before startup. The AI dialog shows which provider, URL, file path, prompt size, and editor context will be sent before generation.
 
+The Web GUI also has an AI Provider settings dialog. It saves non-secret settings per data root at `.study-route/ai-config.json`; environment variables still override saved settings and API keys are never written there.
+
 Generic OpenAI-compatible API:
 
 ```powershell
@@ -222,6 +224,16 @@ $env:LLM_TEMPERATURE="0.4"
 ```
 
 `LLM_PROVIDER` also accepts `ollama`, `lmstudio`, `disabled`, `off`, or `none`. `LLM_DISABLED=1` takes precedence over provider selection.
+
+## Attachments
+
+The editor upload button copies selected images, PDFs, and other files into the active data root:
+
+```text
+attachments/YYYY/MM/
+```
+
+The GUI inserts a relative Markdown image or link, for example `![diagram](attachments/2026/06/abcd1234-diagram.png)`. Attachment uploads are limited to 25 MB and are served only from the active data root.
 
 ## CLI Commands
 

@@ -208,6 +208,103 @@ describe("api", () => {
     });
   });
 
+  it("saves workspace AI settings and uses them for status", async () => {
+    const app = createApp();
+    const saved = await request(app)
+      .put("/api/ai/settings")
+      .send({
+        enabled: true,
+        provider: "ollama",
+        model: "llama3.1",
+        baseUrl: "http://127.0.0.1:11434/v1/",
+        timeout: 30,
+        maxTokens: 1200,
+        temperature: 0.2
+      })
+      .expect(200);
+    expect(saved.body.ok).toBe(true);
+    expect(saved.body.config_source).toBe("workspace");
+    expect(saved.body.api_key_detected).toBe(false);
+    expect(fs.existsSync(path.join(tempRoot, ".study-route", "ai-config.json"))).toBe(true);
+
+    const status = await request(app).get("/api/ai/status").expect(200);
+    expect(status.body).toMatchObject({
+      configured: true,
+      provider_id: "ollama",
+      model: "llama3.1",
+      base_url: "http://127.0.0.1:11434/v1",
+      config_source: "workspace"
+    });
+  });
+
+  it("reports environment overrides over workspace AI settings", async () => {
+    const app = createApp();
+    await request(app)
+      .put("/api/ai/settings")
+      .send({ enabled: true, provider: "ollama", model: "llama3.1", baseUrl: "http://127.0.0.1:11434/v1" })
+      .expect(200);
+
+    process.env.LLM_MODEL = "env-model";
+    process.env.LLM_BASE_URL = "http://127.0.0.1:9999/v1";
+
+    const status = await request(app).get("/api/ai/status").expect(200);
+    expect(status.body).toMatchObject({
+      model: "env-model",
+      base_url: "http://127.0.0.1:9999/v1",
+      config_source: "environment"
+    });
+    expect(status.body.env_overrides).toEqual(expect.arrayContaining(["model", "baseUrl"]));
+  });
+
+  it("saves remote provider settings without storing or requiring an API key", async () => {
+    const app = createApp();
+    const saved = await request(app)
+      .put("/api/ai/settings")
+      .send({ enabled: true, provider: "openai", model: "gpt-test", baseUrl: "https://api.openai.com/v1" })
+      .expect(200);
+    expect(saved.body.api_key_detected).toBe(false);
+
+    const status = await request(app).get("/api/ai/status").expect(200);
+    expect(status.body).toMatchObject({
+      configured: false,
+      provider_id: "openai",
+      required_key_env: "OPENAI_API_KEY 或 LLM_API_KEY"
+    });
+    expect(fs.readFileSync(path.join(tempRoot, ".study-route", "ai-config.json"), "utf8")).not.toContain("apiKey");
+  });
+
+  it("uploads attachments into the data directory and serves them safely", async () => {
+    const app = createApp();
+    const uploaded = await request(app)
+      .post("/api/attachments?name=demo.png")
+      .set("Content-Type", "application/octet-stream")
+      .set("X-File-Mime", "image/png")
+      .send(Buffer.from("fakepng"))
+      .expect(201);
+
+    expect(uploaded.body).toMatchObject({
+      ok: true,
+      size: 7,
+      mime_type: "image/png"
+    });
+    expect(uploaded.body.path).toMatch(/^attachments\/\d{4}\/\d{2}\/[a-f0-9]{8}-demo\.png$/);
+    expect(uploaded.body.markdown).toBe(`![demo.png](${uploaded.body.path})`);
+    expect(fs.existsSync(path.join(tempRoot, uploaded.body.path))).toBe(true);
+
+    await request(app).get(`/${uploaded.body.path}`).expect(200);
+    await request(app).get("/attachments/..%2fdashboard.md").expect(400);
+  });
+
+  it("rejects attachments larger than 25 MB", async () => {
+    const app = createApp();
+    await request(app)
+      .post("/api/attachments?name=too-large.pdf")
+      .set("Content-Type", "application/octet-stream")
+      .set("X-File-Mime", "application/pdf")
+      .send(Buffer.alloc(25 * 1024 * 1024 + 1))
+      .expect(413);
+  });
+
   it("reports OpenAI-compatible LLM provider configuration", async () => {
     process.env.LLM_PROVIDER = "custom";
     process.env.LLM_API_KEY = "test-key";

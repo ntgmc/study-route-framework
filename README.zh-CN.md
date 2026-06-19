@@ -34,6 +34,10 @@ Study Route Framework 是一个本地优先的 Markdown 学习路线管理系统
 
 Web GUI 会在侧栏显示当前数据模式、数据根目录和框架目录，便于编辑前确认资料实际写入位置。
 
+每个数据目录的 AI 配置保存在 `.study-route/ai-config.json`。该文件只保存 provider、Base URL、模型、超时、token 上限、temperature、启用状态等非密钥字段。API Key 仍然只来自环境变量。
+
+上传的图片、PDF 和其它附件会复制到当前数据根目录下的 `attachments/YYYY/MM/`。编辑器插入的 Markdown 使用这个相对路径，因此附件会跟随同一个学习工作区保存。
+
 ## 使用 Demo 数据快速启动
 
 在框架仓库中运行：
@@ -218,6 +222,8 @@ sh scripts/study-gui.sh
 $env:LLM_DISABLED="1"
 .\scripts\study-gui.ps1
 ```
+
+也可以从 Web GUI 侧栏打开 AI Provider 配置。通过 UI 保存的配置只作用于当前 `STUDY_ROUTE_DATA_DIR`，不会保存 API Key。
 
 全局 `LLM_*` 变量优先级高于 provider 专用变量：
 

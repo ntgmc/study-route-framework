@@ -139,6 +139,47 @@ export interface ApplyRouteAdjustmentResponse {
   meta: FileMeta;
 }
 
+export type AiProviderId = "deepseek" | "openai" | "openrouter" | "siliconflow" | "custom" | "ollama" | "lmstudio";
+export type AiConfigSource = "environment" | "workspace" | "default" | "disabled";
+
+export interface AiWorkspaceSettings {
+  enabled: boolean;
+  provider: AiProviderId;
+  baseUrl: string;
+  model: string;
+  timeout: number;
+  maxTokens: number;
+  temperature: number;
+}
+
+export interface AiProviderOption {
+  id: AiProviderId;
+  label: string;
+  local_provider: boolean;
+  api_key_required: boolean;
+  api_key_env: string;
+  base_url_env: string;
+  model_env: string;
+  default_base_url: string;
+  default_model: string;
+}
+
+export interface AiSettingsResponse {
+  settings: AiWorkspaceSettings;
+  saved_settings: Partial<AiWorkspaceSettings>;
+  providers: AiProviderOption[];
+  config_source: AiConfigSource;
+  env_overrides: string[];
+  required_key_env: string;
+  api_key_detected: boolean;
+}
+
+export type SaveAiSettingsRequest = Partial<AiWorkspaceSettings>;
+
+export interface SaveAiSettingsResponse extends AiSettingsResponse {
+  ok: true;
+}
+
 export interface AiStatusResponse {
   enabled: boolean;
   configured: boolean;
@@ -151,6 +192,11 @@ export interface AiStatusResponse {
   required_env: string;
   disabled_reason?: string;
   local_provider: boolean;
+  settings: AiWorkspaceSettings;
+  config_source: AiConfigSource;
+  env_overrides: string[];
+  required_key_env: string;
+  api_key_detected: boolean;
   context_limits: {
     prompt_chars: number;
     context_chars: number;
@@ -172,4 +218,12 @@ export interface AiGenerateResponse {
   model: string;
   content: string;
   usage: unknown;
+}
+
+export interface AttachmentUploadResponse {
+  ok: true;
+  path: string;
+  markdown: string;
+  size: number;
+  mime_type: string;
 }

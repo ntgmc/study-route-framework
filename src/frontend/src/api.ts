@@ -1,9 +1,11 @@
 import type {
   AiGenerateRequest,
   AiGenerateResponse,
+  AiSettingsResponse,
   AiStatusResponse,
   ApplyRouteAdjustmentRequest,
   ApplyRouteAdjustmentResponse,
+  AttachmentUploadResponse,
   ArchiveFileRequest,
   ArchiveFileResponse,
   CreateLogFromPlanRequest,
@@ -21,6 +23,8 @@ import type {
   FileResponse,
   FilesResponse,
   RenameFileRequest,
+  SaveAiSettingsRequest,
+  SaveAiSettingsResponse,
   SaveFileRequest,
   SaveFileResponse,
   SearchResponse,
@@ -64,6 +68,23 @@ export const client = {
   applyRouteAdjustment: (body: ApplyRouteAdjustmentRequest) =>
     api<ApplyRouteAdjustmentResponse>("/api/routes/adjustment", { method: "POST", body: JSON.stringify(body) }),
   aiStatus: () => api<AiStatusResponse>("/api/ai/status"),
+  aiSettings: () => api<AiSettingsResponse>("/api/ai/settings"),
+  saveAiSettings: (body: SaveAiSettingsRequest) =>
+    api<SaveAiSettingsResponse>("/api/ai/settings", { method: "PUT", body: JSON.stringify(body) }),
   aiGenerate: (body: AiGenerateRequest) =>
-    api<AiGenerateResponse>("/api/ai/generate", { method: "POST", body: JSON.stringify(body) })
+    api<AiGenerateResponse>("/api/ai/generate", { method: "POST", body: JSON.stringify(body) }),
+  uploadAttachment: async (file: File) => {
+    const response = await fetch(`/api/attachments?${new URLSearchParams({ name: file.name })}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-File-Mime": file.type || "application/octet-stream",
+        "X-File-Name": file.name
+      },
+      body: await file.arrayBuffer()
+    });
+    const payload = (await response.json().catch(() => ({}))) as AttachmentUploadResponse & { error?: string };
+    if (!response.ok) throw new Error(payload.error || "附件上传失败");
+    return payload;
+  }
 };

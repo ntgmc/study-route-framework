@@ -23,7 +23,8 @@ export function AiDialog({
   content,
   onClose,
   onApply,
-  onConfirmReplace
+  onConfirmReplace,
+  onOpenSettings
 }: {
   section: SectionKey;
   current: FileMeta | null;
@@ -31,6 +32,7 @@ export function AiDialog({
   onClose: () => void;
   onApply: (content: string, replace: boolean) => void;
   onConfirmReplace: () => Promise<boolean>;
+  onOpenSettings?: () => void;
 }) {
   const setStatus = useAppStore((state) => state.setStatus);
   const [aiInfo, setAiInfo] = useState<AiStatusResponse | null>(null);
@@ -148,6 +150,11 @@ export function AiDialog({
         </label>
 
         <div className="flex flex-wrap justify-end gap-2">
+          {onOpenSettings ? (
+            <Button type="button" onClick={onOpenSettings}>
+              配置
+            </Button>
+          ) : null}
           <Button type="button" onClick={onClose}>
             关闭
           </Button>

@@ -112,11 +112,118 @@ jobs:
           path: ${{ steps.metadata.outputs.asset_name }}
           if-no-files-found: error
 
-      - name: Generate changelog and publish GitHub Release
+      - name: Generate changelog from commits
+        id: changelog
+        shell: pwsh
+        run: |
+          $tagName = "${{ steps.metadata.outputs.tag_name }}"
+          git fetch --force --tags
+          git rev-parse --verify "$tagName" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release tag '$tagName' does not exist. Push the tag first, then rerun the Release workflow."
+          }
+
+          $previousTag = git describe --tags --abbrev=0 "$tagName^" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            $previousTag = ""
+            $range = $tagName
+          } else {
+            $range = "$previousTag..$tagName"
+          }
+
+          $separator = [char]31
+          $records = git log $range --pretty=format:"%H%x1f%s%x1f%an%x1f%ae" --no-merges
+          $categories = [ordered]@{
+            "Breaking Changes" = New-Object System.Collections.Generic.List[string]
+            "Features" = New-Object System.Collections.Generic.List[string]
+            "Bug Fixes" = New-Object System.Collections.Generic.List[string]
+            "Security" = New-Object System.Collections.Generic.List[string]
+            "Documentation" = New-Object System.Collections.Generic.List[string]
+            "Tests" = New-Object System.Collections.Generic.List[string]
+            "Maintenance" = New-Object System.Collections.Generic.List[string]
+            "Other Changes" = New-Object System.Collections.Generic.List[string]
+          }
+
+          foreach ($record in $records) {
+            if (-not $record.Trim()) {
+              continue
+            }
+            $parts = $record -split $separator, 4
+            if ($parts.Count -lt 2) {
+              continue
+            }
+
+            $hash = $parts[0]
+            $subject = $parts[1]
+            $shortHash = $hash.Substring(0, 7)
+            $entry = "- $subject ($shortHash)"
+            $prefix = ""
+            if ($subject -match "^(?<type>[A-Za-z]+)(\([^)]+\))?(?<breaking>!)?:") {
+              $prefix = $Matches.type.ToLowerInvariant()
+            }
+
+            if ($subject -match "BREAKING CHANGE|^[A-Za-z]+(\([^)]+\))?!:") {
+              $categories["Breaking Changes"].Add($entry)
+            } elseif ($prefix -in @("feat", "feature")) {
+              $categories["Features"].Add($entry)
+            } elseif ($prefix -in @("fix", "bugfix", "hotfix")) {
+              $categories["Bug Fixes"].Add($entry)
+            } elseif ($prefix -eq "security") {
+              $categories["Security"].Add($entry)
+            } elseif ($prefix -in @("docs", "doc")) {
+              $categories["Documentation"].Add($entry)
+            } elseif ($prefix -in @("test", "tests")) {
+              $categories["Tests"].Add($entry)
+            } elseif ($prefix -in @("chore", "ci", "build", "perf", "refactor", "style", "deps", "maintenance")) {
+              $categories["Maintenance"].Add($entry)
+            } else {
+              $categories["Other Changes"].Add($entry)
+            }
+          }
+
+          $lines = New-Object System.Collections.Generic.List[string]
+          $lines.Add("## $tagName")
+          $lines.Add("")
+          if ($previousTag) {
+            $lines.Add("Changes since ``$previousTag``.")
+          } else {
+            $lines.Add("Initial release notes generated from commit history.")
+          }
+          $lines.Add("")
+
+          foreach ($category in $categories.GetEnumerator()) {
+            if ($category.Value.Count -eq 0) {
+              continue
+            }
+            $lines.Add("### $($category.Key)")
+            $lines.Add("")
+            foreach ($entry in $category.Value) {
+              $lines.Add($entry)
+            }
+            $lines.Add("")
+          }
+
+          if ($lines.Count -le 4) {
+            $lines.Add("No notable commit messages were found for this release.")
+            $lines.Add("")
+          }
+
+          if ($previousTag) {
+            $compareUrl = "https://github.com/${{ github.repository }}/compare/$previousTag...$tagName"
+            $lines.Add("**Full Changelog**: $compareUrl")
+          }
+
+          $body = ($lines -join "`n").Trim() + "`n"
+          $bodyPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
+          [System.IO.File]::WriteAllText($bodyPath, $body, [System.Text.UTF8Encoding]::new($false))
+          "body_path=$bodyPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Publish GitHub Release
         uses: actions/github-script@v7
         env:
           RELEASE_TAG_NAME: ${{ steps.metadata.outputs.tag_name }}
           RELEASE_ASSET_NAME: ${{ steps.metadata.outputs.asset_name }}
+          RELEASE_BODY_PATH: ${{ steps.changelog.outputs.body_path }}
           RELEASE_DRAFT: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
           RELEASE_PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
         with:
@@ -128,15 +235,9 @@ jobs:
             const repo = context.repo.repo;
             const tagName = process.env.RELEASE_TAG_NAME;
             const assetName = process.env.RELEASE_ASSET_NAME;
+            const body = fs.readFileSync(process.env.RELEASE_BODY_PATH, "utf8");
             const draft = process.env.RELEASE_DRAFT === "true";
             const prerelease = process.env.RELEASE_PRERELEASE === "true";
-
-            const generated = await github.rest.repos.generateReleaseNotes({
-              owner,
-              repo,
-              tag_name: tagName,
-              target_commitish: context.sha,
-            });
 
             let release;
             try {
@@ -151,8 +252,8 @@ jobs:
                 repo,
                 release_id: existing.data.id,
                 tag_name: tagName,
-                name: generated.data.name || tagName,
-                body: generated.data.body,
+                name: tagName,
+                body,
                 draft,
                 prerelease,
               });
@@ -167,8 +268,8 @@ jobs:
                 repo,
                 tag_name: tagName,
                 target_commitish: context.sha,
-                name: generated.data.name || tagName,
-                body: generated.data.body,
+                name: tagName,
+                body,
                 draft,
                 prerelease,
                 generate_release_notes: false,

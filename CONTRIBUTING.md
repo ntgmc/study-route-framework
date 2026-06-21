@@ -98,7 +98,7 @@ AI provider API keys must come from environment variables. Workspace AI settings
 4. Update shared types in `types/` when API request or response shapes change.
 5. Add or update tests that cover the changed behavior.
 6. Update `README.md`, `README.zh-CN.md`, `scripts/README.md`, or `CONTRIBUTING.md` when commands, workflows, safety guarantees, or user-visible behavior change.
-7. Add appropriate pull request labels so CI-generated release notes are grouped correctly.
+7. Use a clear conventional commit prefix so CI-generated release notes are grouped correctly.
 
 Use concise branch names. Examples:
 
@@ -169,7 +169,7 @@ The production build may warn when frontend chunks exceed Vite's default size th
 - [ ] `npm.cmd test` passes when code changes are included.
 - [ ] `npm.cmd run build` passes when frontend, backend, or shared TypeScript changes are included.
 - [ ] `npm.cmd run test:e2e` is run or explicitly skipped with a reason when editor workflows change.
-- [ ] Pull request labels are set for CI-generated release notes when the change is notable.
+- [ ] Commit messages use release-note-friendly prefixes when the change is notable.
 
 ## Commit Style
 
@@ -187,17 +187,16 @@ test: cover editor rename flow
 
 ## Release Notes
 
-Do not hand-maintain per-release entries in `CHANGELOG.md`. CI generates release changelogs when the `Release` workflow publishes a GitHub Release.
+Do not hand-maintain per-release entries in `CHANGELOG.md`. CI generates release changelogs from commit history when the `Release` workflow publishes a GitHub Release.
 
-Use pull request labels to control the generated changelog sections:
+Use commit message prefixes to control the generated changelog sections. This works for pull request merges and direct commits.
 
-- `breaking-change` or `breaking` for breaking changes.
-- `feature`, `enhancement`, or `feat` for new functionality.
-- `bug` or `fix` for fixes.
-- `security` for path safety, secret handling, prompt-boundary, or data-exposure hardening.
-- `documentation` or `docs` for docs-only changes.
-- `test` or `tests` for test coverage changes.
-- `chore`, `maintenance`, or `dependencies` for maintenance work.
-- `ignore-for-release` for changes that should be excluded from release notes.
+- `feat:` or `feature:` for new functionality.
+- `fix:`, `bugfix:`, or `hotfix:` for fixes.
+- `security:` for path safety, secret handling, prompt-boundary, or data-exposure hardening.
+- `docs:` or `doc:` for docs-only changes.
+- `test:` or `tests:` for test coverage changes.
+- `chore:`, `ci:`, `build:`, `perf:`, `refactor:`, `style:`, `deps:`, or `maintenance:` for maintenance work.
+- Add `!` before the colon, such as `feat!:` or `refactor(api)!:`, or include `BREAKING CHANGE` in the subject for breaking changes.
 
 Release tags must match `package.json`, for example `v2.0.0` for version `2.0.0`. The release workflow runs typecheck, tests, build, E2E, and dependency audit before generating notes and creating or updating the GitHub Release.
